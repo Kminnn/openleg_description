@@ -1,0 +1,65 @@
+# ROS 2 / colcon build products
+build/
+install/
+log/
+.colcon/
+
+# In-source CMake and test products
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+Testing/
+test_results/
+compile_commands.json
+
+# Python bytecode, caches, coverage, and packaging
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+.eggs/
+
+# Local Python environments and secrets
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# ROS / Gazebo runtime state and recordings
+.ros/
+.gz/
+rosbag2_*/
+*.bag
+*.bag.active
+*.db3
+*.mcap
+
+# Logs, crash dumps, and temporary files
+*.log
+core
+core.*
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# Editor and operating-system metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Robot source assets such as URDF/Xacro, YAML, RViz, STL, DAE, and OBJ
+# are intentionally not ignored and should remain version-controlled.

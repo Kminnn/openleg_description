@@ -1,0 +1,93 @@
+<?xml version="1.0"?>
+<robot name="openleg" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="use_gazebo" default="true"/>
+  <xacro:arg name="controllers_file" default="$(find openleg_description)/config/controllers.yaml"/>
+
+  <!-- Change these dimensions first when adapting the model to the real hardware. -->
+  <xacro:property name="pelvis_x" value="0.18"/>
+  <xacro:property name="pelvis_y" value="0.23358873"/>
+  <xacro:property name="pelvis_z" value="0.26"/>
+  <xacro:property name="hip_spacing" value="0.060"/>
+  <xacro:property name="link1_z" value="0.070"/>
+  <xacro:property name="upper_leg_length" value="0.36"/>
+  <xacro:property name="lower_leg_length" value="0.36"/>
+  <xacro:property name="foot_length" value="0.22"/>
+  <xacro:property name="foot_width" value="0.11"/>
+  <xacro:property name="foot_height" value="0.05"/>
+
+  <material name="pelvis_white"><color rgba="0.55 0.55 0.55 1"/></material>
+  <material name="left_leg_blue"><color rgba="0.55 0.55 0.55 1"/></material>
+  <material name="right_leg_red"><color rgba="0.55 0.55 0.55 1"/></material>
+  <material name="joint_dark"><color rgba="0.55 0.55 0.55 1"/></material>
+  <material name="foot_black"><color rgba="0.55 0.55 0.55 1"/></material>
+
+  <xacro:include filename="left_leg.urdf.xacro"/>
+  <xacro:include filename="right_leg.urdf.xacro"/>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 ${pi / 2}"/>
+      <geometry><mesh filename="package://openleg_description/meshes/base/Base.stl" scale="1 1 1"/></geometry>
+      <material name="pelvis_white"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 ${pi / 2}"/>
+      <geometry><mesh filename="package://openleg_description/meshes/base/Base.stl" scale="1 1 1"/></geometry>
+    </collision>
+    <inertial><origin xyz="0 0 ${pelvis_z / 2}" rpy="0 0 ${pi / 2}"/>
+      <mass value="8.0"/>
+      <inertia ixx="${8.0 * (pelvis_y**2 + pelvis_z**2) / 12}" ixy="0" ixz="0"
+               iyy="${8.0 * (pelvis_x**2 + pelvis_z**2) / 12}" iyz="0"
+               izz="${8.0 * (pelvis_x**2 + pelvis_y**2) / 12}"/>
+    </inertial>
+  </link>
+
+  <xacro:left_leg parent="base_link" hip_y="${hip_spacing / 2}" link1_z="${link1_z}"
+                  upper_leg_length="${upper_leg_length}" lower_leg_length="${lower_leg_length}"
+                  foot_length="${foot_length}" foot_width="${foot_width}" foot_height="${foot_height}"/>
+  <xacro:right_leg parent="base_link" hip_y="-${hip_spacing / 2}" link1_z="${link1_z}"
+                   upper_leg_length="${upper_leg_length}" lower_leg_length="${lower_leg_length}"
+                   foot_length="${foot_length}" foot_width="${foot_width}" foot_height="${foot_height}"/>
+
+  <xacro:macro name="position_controlled_joint" params="joint_name">
+    <joint name="${joint_name}">
+      <command_interface name="position">
+        <param name="min">-3.14159</param>
+        <param name="max">3.14159</param>
+      </command_interface>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:if value="$(arg use_gazebo)">
+    <ros2_control name="GazeboSimSystem" type="system">
+      <hardware><plugin>gz_ros2_control/GazeboSimSystem</plugin></hardware>
+      <xacro:position_controlled_joint joint_name="left_joint1"/>
+      <xacro:position_controlled_joint joint_name="left_joint2"/>
+      <xacro:position_controlled_joint joint_name="left_joint3"/>
+      <xacro:position_controlled_joint joint_name="left_joint4"/>
+      <xacro:position_controlled_joint joint_name="left_joint5"/>
+      <xacro:position_controlled_joint joint_name="left_joint6"/>
+      <xacro:position_controlled_joint joint_name="right_joint1"/>
+      <xacro:position_controlled_joint joint_name="right_joint2"/>
+      <xacro:position_controlled_joint joint_name="right_joint3"/>
+      <xacro:position_controlled_joint joint_name="right_joint4"/>
+      <xacro:position_controlled_joint joint_name="right_joint5"/>
+      <xacro:position_controlled_joint joint_name="right_joint6"/>
+    </ros2_control>
+
+    <gazebo>
+      <plugin filename="libgz_ros2_control-system.so" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <parameters>$(arg controllers_file)</parameters>
+      </plugin>
+      <!-- Stable planar motion for the WASD + IK simulation controller. -->
+      <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl"/>
+      <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+        <dimensions>3</dimensions>
+        <odom_publish_frequency>50</odom_publish_frequency>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+</robot>
