@@ -1,5 +1,8 @@
 # OpenLeg description
 
+<img width="1266" height="797" alt="Screenshot from 2026-07-19 01-08-56-Photoroom" src="https://github.com/user-attachments/assets/707b7a36-a7d0-44e1-9b90-4b68107f7071" />
+
+
 `openleg_description` is a ROS 2 Jazzy description package for a biped with six actuated joints per leg.
 
 The model is intentionally made from URDF primitives so it can be viewed and simulated before final CAD meshes and measured inertial properties are available. Dimensions, masses, joint limits, collision geometry, and inertias should be updated to match the physical robot before controller tuning.
