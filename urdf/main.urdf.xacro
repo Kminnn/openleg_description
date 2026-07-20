@@ -4,6 +4,7 @@
   <xacro:arg name="controllers_file" default="$(find openleg_description)/config/controllers.yaml"/>
 
   <!-- Change these dimensions first when adapting the model to the real hardware. -->
+  <xacro:property name="base_mass" value="12.0"/>
   <xacro:property name="pelvis_x" value="0.18"/>
   <xacro:property name="pelvis_y" value="0.23358873"/>
   <xacro:property name="pelvis_z" value="0.26"/>
@@ -35,10 +36,10 @@
       <geometry><mesh filename="package://openleg_description/meshes/base/Base.stl" scale="1 1 1"/></geometry>
     </collision>
     <inertial><origin xyz="0 0 ${pelvis_z / 2}" rpy="0 0 ${pi / 2}"/>
-      <mass value="8.0"/>
-      <inertia ixx="${8.0 * (pelvis_y**2 + pelvis_z**2) / 12}" ixy="0" ixz="0"
-               iyy="${8.0 * (pelvis_x**2 + pelvis_z**2) / 12}" iyz="0"
-               izz="${8.0 * (pelvis_x**2 + pelvis_y**2) / 12}"/>
+      <mass value="${base_mass}"/>
+      <inertia ixx="${base_mass * (pelvis_y**2 + pelvis_z**2) / 12}" ixy="0" ixz="0"
+               iyy="${base_mass * (pelvis_x**2 + pelvis_z**2) / 12}" iyz="0"
+               izz="${base_mass * (pelvis_x**2 + pelvis_y**2) / 12}"/>
     </inertial>
   </link>
 
@@ -63,7 +64,9 @@
 
   <xacro:if value="$(arg use_gazebo)">
     <ros2_control name="GazeboSimSystem" type="system">
-      <hardware><plugin>gz_ros2_control/GazeboSimSystem</plugin></hardware>
+      <hardware>
+        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+      </hardware>
       <xacro:position_controlled_joint joint_name="left_joint1"/>
       <xacro:position_controlled_joint joint_name="left_joint2"/>
       <xacro:position_controlled_joint joint_name="left_joint3"/>
@@ -78,15 +81,19 @@
       <xacro:position_controlled_joint joint_name="right_joint6"/>
     </ros2_control>
 
+    <!-- Simulated body IMU, mounted 70 mm above the base-link origin. -->
+    <gazebo reference="base_link">
+      <sensor name="base_imu" type="imu">
+        <pose>0 0 0.070 0 0 0</pose>
+        <always_on>true</always_on>
+        <update_rate>100</update_rate>
+        <topic>/imu</topic>
+      </sensor>
+    </gazebo>
+
     <gazebo>
       <plugin filename="libgz_ros2_control-system.so" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
         <parameters>$(arg controllers_file)</parameters>
-      </plugin>
-      <!-- Stable planar motion for the WASD + IK simulation controller. -->
-      <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl"/>
-      <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
-        <dimensions>3</dimensions>
-        <odom_publish_frequency>50</odom_publish_frequency>
       </plugin>
     </gazebo>
   </xacro:if>

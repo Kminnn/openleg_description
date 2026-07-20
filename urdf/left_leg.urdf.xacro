@@ -99,6 +99,6 @@
       <dynamics damping="0.3" friction="0.04"/>
     </joint>
 
-    <gazebo reference="left_link7"><mu1>1.5</mu1><mu2>1.5</mu2><kp>1000000</kp><kd>10</kd></gazebo>
+    <gazebo reference="left_link7"><mu1>2.5</mu1><mu2>2.5</mu2><kp>1000000</kp><kd>10</kd></gazebo>
   </xacro:macro>
 </robot>

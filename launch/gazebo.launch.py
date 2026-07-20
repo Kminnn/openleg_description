@@ -5,7 +5,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, RegisterEventHandler, SetEnvironmentVariable, TimerAction
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
@@ -38,7 +38,7 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([FindPackageShare("ros_gz_sim"), "launch", "gz_sim.launch.py"])
         ),
-        launch_arguments={"gz_args": ["-r -v 3 ", world]}.items(),
+        launch_arguments={"gz_args": ["-v 3 ", world]}.items(),
     )
 
     state_publisher = Node(
@@ -55,32 +55,78 @@ def generate_launch_description():
         arguments=["-topic", "robot_description", "-name", "openleg", "-z", spawn_z],
     )
 
-    joint_state_broadcaster = Node(
+    controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
         output="screen",
-        arguments=["joint_state_broadcaster", "--controller-manager-timeout", "60"],
-    )
-    leg_controller = Node(
-        package="controller_manager",
-        executable="spawner",
-        output="screen",
-        arguments=["leg_controller", "--controller-manager-timeout", "60"],
+        arguments=[
+            "joint_state_broadcaster", "leg_controller", "--inactive",
+            "--controller-manager-timeout", "60",
+        ],
     )
 
-    velocity_bridge = Node(
+    sensor_bridge = Node(
         package="ros_gz_bridge",
         executable="parameter_bridge",
         output="screen",
         arguments=[
-            "/model/openleg/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist",
-            "/model/openleg/odometry@nav_msgs/msg/Odometry@gz.msgs.Odometry",
+            "/imu@sensor_msgs/msg/Imu[gz.msgs.IMU",
             "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
         ],
     )
 
     start_controllers = RegisterEventHandler(
-        OnProcessExit(target_action=spawn_robot, on_exit=[joint_state_broadcaster, leg_controller])
+        OnProcessExit(target_action=spawn_robot, on_exit=[controller_spawner])
+    )
+
+    unpause_simulation = ExecuteProcess(
+        cmd=[
+            "gz", "service", "-s", "/world/openleg/control",
+            "--reqtype", "gz.msgs.WorldControl",
+            "--reptype", "gz.msgs.Boolean",
+            "--timeout", "5000", "--req", "pause: false",
+        ],
+        output="screen",
+    )
+    wait_for_teleop = ExecuteProcess(
+        cmd=[
+            "bash", "-lc",
+            "until ros2 node list 2>/dev/null | grep -qx /wasd_ik_teleop; "
+            "do sleep 0.1; done",
+        ],
+        output="screen",
+    )
+    prime_simulation = ExecuteProcess(
+        cmd=[
+            "bash", "-lc",
+            "for _openleg_step in {1..10}; do "
+            "gz service -s /world/openleg/control "
+            "--reqtype gz.msgs.WorldControl --reptype gz.msgs.Boolean "
+            "--timeout 5000 --req 'multi_step: 10' >/dev/null; "
+            "sleep 0.15; done",
+        ],
+        output="screen",
+    )
+    activate_controllers = ExecuteProcess(
+        cmd=[
+            "ros2", "control", "switch_controllers",
+            "--activate", "joint_state_broadcaster", "leg_controller",
+            "--strict", "--activate-asap",
+        ],
+        output="screen",
+    )
+    wait_for_balance_controller = RegisterEventHandler(
+        OnProcessExit(target_action=controller_spawner, on_exit=[wait_for_teleop])
+    )
+    start_simulation = RegisterEventHandler(
+        OnProcessExit(
+            target_action=wait_for_teleop,
+            on_exit=[
+                TimerAction(period=4.0, actions=[activate_controllers]),
+                TimerAction(period=1.5, actions=[prime_simulation]),
+                TimerAction(period=5.0, actions=[unpause_simulation]),
+            ],
+        )
     )
 
     resource_path = SetEnvironmentVariable(
@@ -89,13 +135,21 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        DeclareLaunchArgument("world", default_value="empty.sdf", description="Gazebo world SDF file"),
-        DeclareLaunchArgument("spawn_z", default_value="0.60", description="Initial pelvis height in metres"),
+        DeclareLaunchArgument(
+            "world",
+            default_value=PathJoinSubstitution(
+                [FindPackageShare(package_name), "worlds", "openleg.sdf"]
+            ),
+            description="Gazebo world SDF file",
+        ),
+        DeclareLaunchArgument("spawn_z", default_value="0.545", description="Initial pelvis height in metres"),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         resource_path,
         gazebo,
         state_publisher,
-        velocity_bridge,
+        sensor_bridge,
         spawn_robot,
         start_controllers,
+        wait_for_balance_controller,
+        start_simulation,
     ])
