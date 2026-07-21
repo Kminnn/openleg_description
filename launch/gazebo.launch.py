@@ -91,7 +91,8 @@ def generate_launch_description():
     wait_for_teleop = ExecuteProcess(
         cmd=[
             "bash", "-lc",
-            "until ros2 node list 2>/dev/null | grep -qx /wasd_ik_teleop; "
+            "until ros2 node list 2>/dev/null "
+            "| grep -Eq '^/(wasd_ik_teleop|fixed_gait_demo|right_leg_lift_test|short_step_walk_demo)$'; "
             "do sleep 0.1; done",
         ],
         output="screen",

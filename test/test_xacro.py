@@ -36,7 +36,7 @@ def test_gazebo_model_uses_physics_and_base_imu():
 
     with open(controllers, encoding="utf-8") as controller_file:
         controller_config = controller_file.read()
-    assert "position_proportional_gain: 4.0" in controller_config
+    assert "position_proportional_gain: 0.2" in controller_config
 
     sensor = robot.find("./gazebo[@reference='base_link']/sensor[@name='base_imu']")
     assert sensor is not None

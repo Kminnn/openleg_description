@@ -1,6 +1,6 @@
 gz_ros_control:
   ros__parameters:
-    position_proportional_gain: 4.0
+    position_proportional_gain: 0.2
 
 controller_manager:
   ros__parameters:

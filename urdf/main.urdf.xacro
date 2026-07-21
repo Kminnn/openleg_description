@@ -4,17 +4,20 @@
   <xacro:arg name="controllers_file" default="$(find openleg_description)/config/controllers.yaml"/>
 
   <!-- Change these dimensions first when adapting the model to the real hardware. -->
-  <xacro:property name="base_mass" value="12.0"/>
+  <xacro:property name="base_mass" value="4.0"/>
   <xacro:property name="pelvis_x" value="0.18"/>
   <xacro:property name="pelvis_y" value="0.23358873"/>
   <xacro:property name="pelvis_z" value="0.26"/>
-  <xacro:property name="hip_spacing" value="0.060"/>
+  <!-- Inward test spacing: reduces the lateral COM transfer needed for one-leg support. -->
+  <xacro:property name="hip_spacing" value="0.000"/>
   <xacro:property name="link1_z" value="0.070"/>
   <xacro:property name="upper_leg_length" value="0.36"/>
   <xacro:property name="lower_leg_length" value="0.36"/>
-  <xacro:property name="foot_length" value="0.22"/>
-  <xacro:property name="foot_width" value="0.11"/>
-  <xacro:property name="foot_height" value="0.05"/>
+  <!-- Moderate single-support footprint: 200 x 140 x 30 mm. -->
+  <xacro:property name="foot_length" value="0.20"/>
+  <xacro:property name="foot_width" value="0.14"/>
+  <xacro:property name="foot_height" value="0.03"/>
+  <xacro:property name="foot_collision_width" value="0.14"/>
 
   <material name="pelvis_white"><color rgba="0.55 0.55 0.55 1"/></material>
   <material name="left_leg_blue"><color rgba="0.55 0.55 0.55 1"/></material>
@@ -45,10 +48,10 @@
 
   <xacro:left_leg parent="base_link" hip_y="${hip_spacing / 2}" link1_z="${link1_z}"
                   upper_leg_length="${upper_leg_length}" lower_leg_length="${lower_leg_length}"
-                  foot_length="${foot_length}" foot_width="${foot_width}" foot_height="${foot_height}"/>
+                  foot_length="${foot_length}" foot_width="${foot_width}" foot_height="${foot_height}" foot_collision_width="${foot_collision_width}"/>
   <xacro:right_leg parent="base_link" hip_y="-${hip_spacing / 2}" link1_z="${link1_z}"
                    upper_leg_length="${upper_leg_length}" lower_leg_length="${lower_leg_length}"
-                   foot_length="${foot_length}" foot_width="${foot_width}" foot_height="${foot_height}"/>
+                   foot_length="${foot_length}" foot_width="${foot_width}" foot_height="${foot_height}" foot_collision_width="${foot_collision_width}"/>
 
   <xacro:macro name="position_controlled_joint" params="joint_name">
     <joint name="${joint_name}">
@@ -83,6 +86,9 @@
 
     <!-- Simulated body IMU, mounted 70 mm above the base-link origin. -->
     <gazebo reference="base_link">
+      <mu1>2.5</mu1><mu2>2.5</mu2>
+      <kp>200000</kp><kd>1000</kd>
+      <maxVel>0.05</maxVel><minDepth>0.001</minDepth>
       <sensor name="base_imu" type="imu">
         <pose>0 0 0.070 0 0 0</pose>
         <always_on>true</always_on>
