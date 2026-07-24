@@ -17,7 +17,7 @@ The values below describe the repository state validated on 2026-07-22. Entries 
 | Restitution | 0.0 |
 | Gazebo position proportional gain | 0.2 |
 | Spawn height | `spawn_z:=0.58` |
-| Presentation gait | 20 steps, 30 mm per foot placement, 20 mm swing clearance |
+| Narrow high-knee gait | 20 steps in 150.00 s, 150 mm stance, 20 mm clearance, 30 mm placement; one right-left cycle dynamically stable |
 | IMU | 70 mm above `base_link`; not used by the fixed presentation gait |
 
 Motor limits currently use the supplied peak ratings: J1, J2, J4, and J5 use 140 Nm and 100 rpm; J3 and J6 use 97 Nm and 40 rpm. The earlier 40 Nm and 30 Nm values are treated as non-peak ratings.
@@ -185,7 +185,7 @@ __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optim
 
 - **Solution:** Added `right_leg_lift_test`: both feet planted, 2-second left shift, 2-second hold, and a 10 mm right-foot lift over 2 seconds with no forward swing and no IMU.
 - **Validation:** The robot stayed upright for more than 47 simulated seconds after the endpoint; measured right-foot clearance was 9.69 mm, base roll was about 3.3 degrees, and peak final effort was about 40.4 Nm.
-- **Status:** Solved and dynamically validated.
+- **Status:** Historical result only; superseded by the running attempt and the narrow-stance fallback below.
 
 ## E. Fixed gait and final walking solution
 
@@ -228,39 +228,74 @@ __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optim
 - **Solution:** Add small Joint3 feed-forward offsets calculated to cancel kinematic yaw. These offsets keep the robot straight and are not turn commands.
 - **Status:** Solved.
 
-### 31. Needed a repeatable 20-step professor demonstration
+### 31. **Superseded:** repeatable 20-step overlap-walk demonstration
 
-- **Solution:** Added `short_step_walk_demo.py`, defaulting to 10 right-left cycles, or 20 individual steps. It uses no IMU and no external pose constraint.
-- **Final dynamic validation:** The robot stayed upright, the pelvis advanced about 616 mm, the left and right feet advanced about 600 mm and 570 mm respectively, yaw remained effectively zero, lateral drift stayed around 1 mm, and the final pose did not slide after commands stopped.
-- **Status:** Solved and dynamically validated.
+- **Solution:** Added separate `short_step_walk_demo.py` and `overlap_walk_demo.py` executables. The first completes every support shift before lifting; the second begins lift at 75% transfer. Both default to 10 right-left cycles, use soft touchdown, and have no IMU or external pose constraint.
+- **Final dynamic validation of `overlap_walk_demo` at 1.5x timing:** The updated 128-second sequence stayed upright and advanced the pelvis about 621.5 mm. Its final pose was unchanged after a further 15-second hold, showing no residual bounce or slide after commands stopped.
+- **Sequential smoke validation:** `short_step_walk_demo` completed one full right-left cycle upright and held an unchanged final pose after the trajectory.
+- **Status:** Historical result only; superseded by the running attempt and the narrow-stance fallback below.
+
+### 32. **Superseded:** overlap-walk touchdown jiggle reduction
+
+- **Symptom:** The robot made a small visible body movement just as the lowered foot reached the floor.
+- **Cause:** The first soft-landing profile still covered its final 3.75 mm in 0.5 seconds, about 7.5 mm/s, and settled for only 0.2 seconds. That left enough downward momentum for a small contact bounce.
+- **Solution:** In `overlap_walk_demo` only, added a measured 4.60 mm pre-contact waypoint and a 0.68 mm near-contact waypoint. The average final descent rate is 0.975 mm/s, both endpoints command zero velocity, and the planted hold is 0.4 seconds before weight transfer. The sequential 1.5x demo was not changed.
+- **Validation:** The complete 20-step, 128-second Gazebo run stayed upright, advanced the pelvis 621.5 mm, and its final XYZ and RPY were unchanged after a 15-second hold.
+- **Status:** Historical result only; superseded by the current narrow high-knee sequence.
+
+### 32b. Fixed-flight attempt and narrow-stance fall correction
+
+- **Request:** Make `overlap_walk_demo.py` run instead of performing the earlier concurrent walk.
+- **Failure cause:** The original nominal pose places the foot centers 280.7 mm apart even though hip-mount spacing is zero. A fixed flight path therefore required excessive lateral COM travel. Narrow-flight tests corrected the lateral fall but still fell backward without feedback.
+- **Active correction:** The demo now settles to a 150 mm stance through Joint2, keeps the support leg fixed during every lift, uses 20 mm knee clearance and 30 mm alternating placements, and removes the unsuccessful flight commands.
+- **Safety checks:** All 12 joint limits and conservative spline peak speeds pass at `speed_scale:=1.1`; the largest predicted motor-speed ratio is below 0.08.
+- **Dynamic result:** One installed right-left cycle at `spawn_z:=0.58` remained upright and held unchanged for another 10 seconds at XYZ `[-0.0664, -0.0317, 0.5770]` m and RPY `[1.86, -10.64, -1.76]` degrees.
+- **Status:** The fall is corrected for the narrow high-knee cycle. True running flight remains unresolved and is not claimed.
 
 ## F. ROS launch and repository workflow
 
-### 32. Xacro output failed as a ROS parameter at launch
+### 33. Xacro output failed as a ROS parameter at launch
 
 - **Symptom:** The URDF could pass Xacro checks but fail only when `robot_state_publisher` started because the expanded XML was interpreted as YAML.
 - **Cause:** ROS 2 Jazzy launch parameter type inference did not always preserve the expanded Xacro output as a plain string.
 - **Solution:** Wrap `robot_description` with `launch_ros.parameter_descriptions.ParameterValue(..., value_type=str)` in both display and Gazebo launch files.
 - **Status:** Solved and covered by package tests.
 
-### 33. Source edits did not appear in the running package
+### 34. Source edits did not appear in the running package
 
 - **Cause:** ROS commands use the installed workspace copy, which can be stale if the package was not rebuilt or the terminal was not sourced again.
 - **Solution:** Build with `colcon build --symlink-install --packages-select openleg_description`, then source `~/ros2_ws/install/setup.bash` in each new terminal.
 - **Status:** Solved and included in the run instructions.
 
-### 34. Generated files should not be committed
+### 35. Generated files should not be committed
 
 - **Problem:** Colcon products, Python caches, Gazebo state, logs, recordings, editor files, and temporary files could clutter the first full project commit.
 - **Solution:** Added a package `.gitignore` covering build/install/log outputs, caches, local environments, Gazebo state, rosbag files, logs, crashes, and editor metadata while explicitly keeping robot source assets version-controlled.
 - **Status:** Solved.
 
-### 35. Base mass and experimental values changed repeatedly
+### 36. Base mass and experimental values changed repeatedly
 
 - **History:** Base values of 5 kg and 12 kg were discussed or tested while investigating COM behavior. IMU thresholds, pre-lean angles, foot sizes, and J6 range also went through temporary experiments.
 - **Solution:** Keep the current validated values in the configuration table at the top of this document and label superseded experiments clearly. The current base mass is 4.0 kg.
 - **Status:** Solved as a documentation/configuration-control issue.
 
+
+### 37. WASD forward walking did not match the validated main gait
+
+- **Symptom:** The standalone short-step presentation walked correctly, but pressing `W` still ran the older continuously generated sinusoidal IK gait.
+- **Cause:** `wasd_ik_teleop` had its own 30 Hz forward gait generator and did not share the contact-locked keyframes from `short_step_walk_demo`.
+- **Solution:** Made `short_step_walk_demo.py` the canonical importable gait source. Keyboard `W` now publishes those exact sequential phases, suspends IK output until the final hold, and `Space` cancels to the measured joint positions. Plain `W` uses 1.0x timing and `Shift+W` uses the validated 1.5x timing.
+- **Validation:** The installed `Shift+W` path completed one 29-point right-left cycle in 17.80 seconds, advanced the pelvis 75.7 mm, stayed upright, and had unchanged final XYZ/RPY after a 10-second hold.
+- **Status:** Historical result only; superseded by the running attempt and the narrow-stance fallback below.
+
+
+### 38. Keyboard S, A, and D still used the unstable continuous IK preview
+
+- **Symptom:** `W` used the stable presentation gait, but backward and turn keys could slip or fall because they still drove the old continuously generated IK targets.
+- **Cause:** Only the forward keyboard path had been replaced. `S`, `A`, and `D` still published independent 30 Hz swing targets without preserving support-foot world contacts.
+- **Solution:** Added fixed contact-aware directional phases. `S` mirrors the forward contact progression for a backward right-left cycle. `A` and `D` place both feet at a new 5-degree yaw in sequence, using Joint 3 for yaw and Joint 2 plus Joint 6 for lateral support transfer. Fixed trajectories suppress the continuous IK publisher until their final hold.
+- **Validation at 1.5x timing:** `Shift+S` stayed upright and moved 42.4 mm backward. `Shift+A` reached +5.02 degrees yaw and `Shift+D` reached -4.98 degrees yaw. Roll stayed within 0.19 degrees and pitch near 1.80 degrees; all final poses remained unchanged during their settle checks.
+- **Status:** Solved and dynamically validated in fresh Gazebo spawns for each direction.
 
 ## Recommended demonstration procedure
 
@@ -287,7 +322,8 @@ Press Enter once the controller reports that the 20-step contact-locked walk is 
 ```bash
 cd ~/ros2_ws/src/openleg_description
 python3 scripts/short_step_walk_demo.py --self-test
-python3 -m py_compile scripts/short_step_walk_demo.py launch/gazebo.launch.py
+python3 scripts/overlap_walk_demo.py --self-test
+python3 -m py_compile scripts/short_step_walk_demo.py scripts/overlap_walk_demo.py launch/gazebo.launch.py
 git diff --check
 
 cd ~/ros2_ws

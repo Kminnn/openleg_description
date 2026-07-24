@@ -113,6 +113,6 @@
     <gazebo reference="left_link4"><mu1>2.5</mu1><mu2>2.5</mu2><kp>200000</kp><kd>1000</kd><maxVel>0.05</maxVel><minDepth>0.001</minDepth></gazebo>
     <gazebo reference="left_link5"><mu1>2.5</mu1><mu2>2.5</mu2><kp>200000</kp><kd>1000</kd><maxVel>0.05</maxVel><minDepth>0.001</minDepth></gazebo>
     <gazebo reference="left_link6"><mu1>2.5</mu1><mu2>2.5</mu2><kp>200000</kp><kd>1000</kd><maxVel>0.05</maxVel><minDepth>0.001</minDepth></gazebo>
-    <gazebo reference="left_link7"><mu1>2.5</mu1><mu2>2.5</mu2><kp>200000</kp><kd>1000</kd><maxVel>0.05</maxVel><minDepth>0.001</minDepth></gazebo>
+    <gazebo reference="left_link7"><mu1>1.2</mu1><mu2>1.2</mu2><kp>200000</kp><kd>1000</kd><maxVel>0.05</maxVel><minDepth>0.001</minDepth></gazebo>
   </xacro:macro>
 </robot>

@@ -78,6 +78,10 @@ RIGHT_PLANT = pose(
     0.117146, 0.190195, 0.016211, -0.319639, 0.235537, -0.190677,
     0.190095, -0.188103, -0.029918, -0.337480, 0.181709, 0.190638,
 )
+SOFT_TOUCH_RATIO = 0.75
+RIGHT_PRECONTACT = RIGHT_SWING_FORWARD + SOFT_TOUCH_RATIO * (
+    RIGHT_PLANT - RIGHT_SWING_FORWARD
+)
 TRANSFER_RIGHT_25 = pose(
     0.167577, 0.095610, 0.013051, -0.499740, 0.364286, -0.096295,
     0.237207, -0.093997, -0.019601, -0.508059, 0.303275, 0.096212,
@@ -106,6 +110,9 @@ LEFT_PLANT = pose(
     0.190095, -0.188103, -0.029918, -0.337480, 0.181709, 0.190638,
     0.117146, 0.190195, 0.016211, -0.319639, 0.235537, -0.190677,
 )
+LEFT_PRECONTACT = LEFT_SWING_FORWARD + SOFT_TOUCH_RATIO * (
+    LEFT_PLANT - LEFT_SWING_FORWARD
+)
 TRANSFER_LEFT_25 = pose(
     0.237207, -0.093997, -0.019601, -0.508059, 0.303275, 0.096212,
     0.167577, 0.095610, 0.013051, -0.499740, 0.364286, -0.096295,
@@ -128,7 +135,7 @@ RIGHT_LIFT_PERIODIC = pose(
 )
 
 
-def make_phases(cycles: int = 10, speed_scale: float = 1.0) -> tuple[Phase, ...]:
+def make_phases(cycles: int = 10, speed_scale: float = 1.5) -> tuple[Phase, ...]:
     cycles = max(1, min(10, int(cycles)))
     speed_scale = float(np.clip(speed_scale, 0.5, 1.5))
     phases: list[Phase] = []
@@ -140,26 +147,30 @@ def make_phases(cycles: int = 10, speed_scale: float = 1.0) -> tuple[Phase, ...]
     add("shift left 25 percent with both feet fixed", 0.50, SHIFT_LEFT_25)
     add("shift left 50 percent with both feet fixed", 0.50, SHIFT_LEFT_50)
     add("shift left 75 percent with both feet fixed", 0.50, SHIFT_LEFT_75)
-    add("shift onto left foot", 0.50, SHIFT_LEFT_INITIAL)
-    add("hold left support", 0.60, SHIFT_LEFT_INITIAL)
+    add("finish initial shift onto left foot", 0.50, SHIFT_LEFT_INITIAL)
+    add("hold initial left support", 0.60, SHIFT_LEFT_INITIAL)
     add("lift right foot vertically", 1.50, RIGHT_LIFT_INITIAL)
     for cycle in range(1, cycles + 1):
         add(f"cycle {cycle}: swing right foot forward", 1.00, RIGHT_SWING_FORWARD)
         add(f"cycle {cycle}: hold right foot clear", 0.60, RIGHT_SWING_FORWARD)
-        add(f"cycle {cycle}: plant right foot", 1.00, RIGHT_PLANT)
+        add(f"cycle {cycle}: lower right foot to pre-contact", 0.65, RIGHT_PRECONTACT)
+        add(f"cycle {cycle}: softly plant right foot", 0.75, RIGHT_PLANT)
+        add(f"cycle {cycle}: settle right-foot contact", 0.30, RIGHT_PLANT)
         add(f"cycle {cycle}: transfer right 25 percent", 1.00, TRANSFER_RIGHT_25)
         add(f"cycle {cycle}: transfer right 50 percent", 1.00, TRANSFER_RIGHT_50)
         add(f"cycle {cycle}: transfer right 75 percent", 1.00, TRANSFER_RIGHT_75)
-        add(f"cycle {cycle}: support on right foot", 1.00, SHIFT_RIGHT)
+        add(f"cycle {cycle}: finish shift onto right foot", 1.00, SHIFT_RIGHT)
         add(f"cycle {cycle}: hold right support", 1.50, SHIFT_RIGHT)
         add(f"cycle {cycle}: lift left foot vertically", 1.50, LEFT_LIFT_VERTICAL)
         add(f"cycle {cycle}: swing left foot forward", 1.00, LEFT_SWING_FORWARD)
         add(f"cycle {cycle}: hold left foot clear", 0.60, LEFT_SWING_FORWARD)
-        add(f"cycle {cycle}: plant left foot", 1.00, LEFT_PLANT)
+        add(f"cycle {cycle}: lower left foot to pre-contact", 0.65, LEFT_PRECONTACT)
+        add(f"cycle {cycle}: softly plant left foot", 0.75, LEFT_PLANT)
+        add(f"cycle {cycle}: settle left-foot contact", 0.30, LEFT_PLANT)
         add(f"cycle {cycle}: transfer left 25 percent", 1.00, TRANSFER_LEFT_25)
         add(f"cycle {cycle}: transfer left 50 percent", 1.00, TRANSFER_LEFT_50)
         add(f"cycle {cycle}: transfer left 75 percent", 1.00, TRANSFER_LEFT_75)
-        add(f"cycle {cycle}: support on left foot", 1.00, SHIFT_LEFT_NEXT)
+        add(f"cycle {cycle}: finish shift onto left foot", 1.00, SHIFT_LEFT_NEXT)
         add(f"cycle {cycle}: hold left support", 1.50, SHIFT_LEFT_NEXT)
         if cycle < cycles:
             add(f"cycle {cycle + 1}: lift right foot vertically", 1.50, RIGHT_LIFT_PERIODIC)
@@ -192,7 +203,7 @@ class ShortStepWalkDemo(Node):
     def __init__(self) -> None:
         super().__init__("short_step_walk_demo")
         self.declare_parameter("cycles", 10)
-        self.declare_parameter("speed_scale", 1.0)
+        self.declare_parameter("speed_scale", 1.5)
         self.declare_parameter("auto_start", False)
         self.declare_parameter("controller_topic", "/leg_controller/joint_trajectory")
         self.controller_client = self.create_client(
