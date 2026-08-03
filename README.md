@@ -1,5 +1,8 @@
 # OpenLeg description
 
+<img width="1266" height="797" alt="Screenshot from 2026-07-19 01-08-56-Photoroom" src="https://github.com/user-attachments/assets/707b7a36-a7d0-44e1-9b90-4b68107f7071" />
+
+
 `openleg_description` is a ROS 2 Jazzy description package for a biped with six actuated joints per leg.
 
 For the complete problem-and-solution history from CAD pivots through the validated 20-step gait, see [TROUBLESHOOTING_HISTORY.md](TROUBLESHOOTING_HISTORY.md).
