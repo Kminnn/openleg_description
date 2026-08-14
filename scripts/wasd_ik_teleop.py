@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WASD teleoperation with a URDF-derived numerical IK gait for OpenLeg."""
+"""WASD teleoperation with contact-aware fixed directional gaits for OpenLeg."""
 
 from __future__ import annotations
 
@@ -19,10 +19,162 @@ import rclpy
 import xacro
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import Twist
-from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
+from sensor_msgs.msg import Imu, JointState
+from directional_step_gait import (
+    make_backward_phases as make_base_backward_phases,
+)
+from short_step_walk_demo import (
+    JOINT_NAMES as SHORT_STEP_JOINT_NAMES,
+    Phase as ShortStepPhase,
+    make_phases as make_base_short_step_phases,
+    seconds_to_point_time,
+    validate_phases as validate_short_step_phases,
+)
+from ten_degree_turn_gait import make_turn_phases as make_base_turn_phases
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+
+
+FIXED_GAIT_MIN_SPEED_SCALE = 0.5
+FIXED_GAIT_MAX_SPEED_SCALE = 5.0
+DEFAULT_FIXED_JOINT2_SCALE = 0.65
+
+
+def reduce_fixed_gait_joint2(
+    phases, joint2_scale: float = DEFAULT_FIXED_JOINT2_SCALE,
+) -> tuple[ShortStepPhase, ...]:
+    """Trade excessive hip roll for a small, natural support-side body roll.
+
+    The fixed keyframes predate the current, heavier upper body and lower
+    Joint2 effort limit. Scaling only the mirrored hip-roll joints while
+    retaining the ankle-roll targets lets the planted feet tilt the body into
+    support instead of translating an upright pelvis all the way over one
+    foot.
+    """
+    scale = float(np.clip(joint2_scale, 0.5, 1.0))
+    result = []
+    for phase in phases:
+        positions = phase.positions.copy()
+        positions[[1, 7]] *= scale
+        result.append(ShortStepPhase(phase.label, phase.duration, positions))
+    return tuple(result)
+
+
+def retime_fixed_phases(
+    phases, speed_scale: float, support_scale: float = 2.5,
+    final_hold_cap: float | None = 0.15,
+) -> tuple[ShortStepPhase, ...]:
+    """Use contact-aware overlap timing above the validated 1.5x setting."""
+    scale = float(np.clip(
+        speed_scale, FIXED_GAIT_MIN_SPEED_SCALE, FIXED_GAIT_MAX_SPEED_SCALE
+    ))
+    if scale <= 1.5:
+        result = []
+        for phase in phases:
+            duration = phase.duration / scale
+            if (
+                final_hold_cap is not None
+                and "hold final planted stance" in phase.label.lower()
+            ):
+                duration = min(duration, final_hold_cap)
+            result.append(ShortStepPhase(phase.label, duration, phase.positions))
+        return tuple(result)
+
+    # Use a direction-specific tested cap for support transfer and touchdown.
+    # Remove stationary waits and accelerate only the unloaded swing leg.
+    critical_scale = float(np.clip(support_scale, 1.5, 2.5))
+    result = []
+    for phase in phases:
+        label = phase.label.lower()
+        if "hold final planted stance" in label and final_hold_cap is not None:
+            duration = final_hold_cap
+        elif "hold" in label:
+            duration = 0.12
+        elif "settle" in label:
+            duration = 0.15
+        elif "lift" in label or "swing" in label:
+            duration = phase.duration / scale
+        else:
+            duration = phase.duration / critical_scale
+        result.append(ShortStepPhase(phase.label, duration, phase.positions))
+    return tuple(result)
+
+
+def make_short_step_phases(
+    cycles: int = 1, speed_scale: float = 1.0,
+    joint2_scale: float = DEFAULT_FIXED_JOINT2_SCALE,
+) -> tuple[ShortStepPhase, ...]:
+    return reduce_fixed_gait_joint2(retime_fixed_phases(
+        make_base_short_step_phases(cycles, speed_scale=1.0),
+        speed_scale,
+        support_scale=2.5,
+    ), joint2_scale)
+
+
+def make_backward_phases(
+    cycles: int = 1, speed_scale: float = 1.0,
+    joint2_scale: float = DEFAULT_FIXED_JOINT2_SCALE,
+) -> tuple[ShortStepPhase, ...]:
+    return reduce_fixed_gait_joint2(retime_fixed_phases(
+        make_base_backward_phases(cycles, speed_scale=1.0),
+        speed_scale,
+        support_scale=2.0,
+    ), joint2_scale)
+
+
+def make_continuation_template(base_builder, cycles: int) -> tuple[ShortStepPhase, ...]:
+    """Repeat the periodic block from the existing left-support pose."""
+    cycles = max(1, min(10, int(cycles)))
+    template = base_builder(2, speed_scale=1.0)
+    start = next(
+        index
+        for index, phase in enumerate(template)
+        if phase.label.startswith("cycle 2: lift right foot vertically")
+    )
+    block = template[start:-1]
+    phases = []
+    for cycle in range(1, cycles + 1):
+        for phase in block:
+            label = phase.label.replace("cycle 2:", f"continuation {cycle}:")
+            phases.append(ShortStepPhase(label, phase.duration, phase.positions))
+    phases.append(template[-1])
+    return tuple(phases)
+
+
+def make_short_step_continuation(
+    cycles: int = 1, speed_scale: float = 1.0,
+    joint2_scale: float = DEFAULT_FIXED_JOINT2_SCALE,
+) -> tuple[ShortStepPhase, ...]:
+    return reduce_fixed_gait_joint2(retime_fixed_phases(
+        make_continuation_template(make_base_short_step_phases, cycles),
+        speed_scale,
+        support_scale=2.5,
+    ), joint2_scale)
+
+
+def make_backward_continuation(
+    cycles: int = 1, speed_scale: float = 1.0,
+    joint2_scale: float = DEFAULT_FIXED_JOINT2_SCALE,
+) -> tuple[ShortStepPhase, ...]:
+    return reduce_fixed_gait_joint2(retime_fixed_phases(
+        make_continuation_template(make_base_backward_phases, cycles),
+        speed_scale,
+        support_scale=2.0,
+    ), joint2_scale)
+
+
+def make_turn_phases(
+    left: bool, speed_scale: float = 1.0,
+    joint2_scale: float = DEFAULT_FIXED_JOINT2_SCALE,
+) -> tuple[ShortStepPhase, ...]:
+    return reduce_fixed_gait_joint2(retime_fixed_phases(
+        make_base_turn_phases(left, speed_scale=1.0),
+        min(float(speed_scale), 1.5),
+        support_scale=1.5,
+        final_hold_cap=None,
+    ), joint2_scale)
 
 
 def vector(text: str | None) -> np.ndarray:
@@ -116,29 +268,89 @@ class LegKinematics:
         self,
         target: np.ndarray,
         seed: np.ndarray,
-        joint3_target: float = 0.0,
+        locked_positions: dict[int, float] | None = None,
+        pitch_target: float | None = None,
+        pitch_weight: float = 0.20,
+        knee_target: float | None = None,
+        knee_weight: float = 0.08,
+        joint1_target: float | None = None,
+        joint1_weight: float = 0.06,
     ) -> tuple[np.ndarray, float]:
         positions = np.clip(seed.copy(), self.lower, self.upper)
-        for _ in range(30):
+        locked = locked_positions or {}
+        for index, value in locked.items():
+            if index < 0 or index >= len(self.joints):
+                raise IndexError(f"Invalid locked joint index {index}")
+            positions[index] = float(np.clip(value, self.lower[index], self.upper[index]))
+        free = np.asarray(
+            [index for index in range(len(self.joints)) if index not in locked],
+            dtype=int,
+        )
+
+        for _ in range(50):
             foot, jacobian = self.forward(positions)
             error = target - foot
+            pitch_error = 0.0
+            knee_error = 0.0
+            joint1_error = 0.0
+            task_error = error
+            task_jacobian = jacobian
+            pitch_active = pitch_target is not None and pitch_weight > 1e-6
+            knee_active = knee_target is not None and knee_weight > 1e-6
+            joint1_active = joint1_target is not None and joint1_weight > 1e-6
+            if pitch_active:
+                pitch_error = pitch_target - (
+                    positions[0] + positions[3] + positions[4]
+                )
+                pitch_jacobian = np.zeros(6)
+                pitch_jacobian[[0, 3, 4]] = 1.0
+                task_error = np.append(error, pitch_weight * pitch_error)
+                task_jacobian = np.vstack((
+                    jacobian,
+                    pitch_weight * pitch_jacobian,
+                ))
+            if knee_active:
+                knee_error = knee_target - positions[3]
+                knee_jacobian = np.zeros(6)
+                knee_jacobian[3] = 1.0
+                task_error = np.append(task_error, knee_weight * knee_error)
+                task_jacobian = np.vstack((
+                    task_jacobian,
+                    knee_weight * knee_jacobian,
+                ))
+            if joint1_active:
+                joint1_error = joint1_target - positions[0]
+                joint1_jacobian = np.zeros(6)
+                joint1_jacobian[0] = 1.0
+                task_error = np.append(
+                    task_error, joint1_weight * joint1_error
+                )
+                task_jacobian = np.vstack((
+                    task_jacobian,
+                    joint1_weight * joint1_jacobian,
+                ))
             if (
                 np.linalg.norm(error) < 0.0007
-                and abs(joint3_target - positions[2]) < 0.01
-            ):
+                and (not pitch_active or abs(pitch_error) < 0.003)
+                and (not knee_active or abs(knee_error) < 0.02)
+                and (not joint1_active or abs(joint1_error) < 0.03)
+            ) or free.size == 0:
                 break
-            damped = jacobian @ jacobian.T + 0.025 ** 2 * np.eye(3)
-            pseudo_inverse = jacobian.T @ np.linalg.solve(damped, np.eye(3))
-            primary = pseudo_inverse @ error
-            preferred = positions.copy()
-            preferred[2] = joint3_target
-            nullspace = np.eye(6) - pseudo_inverse @ jacobian
-            secondary = 0.20 * nullspace @ (preferred - positions)
-            positions = np.clip(
-                positions + np.clip(primary + secondary, -0.06, 0.06),
-                self.lower,
-                self.upper,
+            reduced_jacobian = task_jacobian[:, free]
+            damped = (
+                reduced_jacobian @ reduced_jacobian.T
+                + 0.025 ** 2 * np.eye(task_error.size)
             )
+            step = reduced_jacobian.T @ np.linalg.solve(damped, task_error)
+            positions[free] = np.clip(
+                positions[free] + np.clip(step, -0.08, 0.08),
+                self.lower[free],
+                self.upper[free],
+            )
+            for index, value in locked.items():
+                positions[index] = float(
+                    np.clip(value, self.lower[index], self.upper[index])
+                )
         error = float(np.linalg.norm(target - self.forward(positions)[0]))
         return positions, error
 
@@ -155,26 +367,71 @@ def load_robot() -> ET.Element:
     return ET.fromstring(document.toxml())
 
 
+def build_phase_trajectory(
+    phases,
+    coast_through_waypoints: bool = False,
+) -> tuple[JointTrajectory, float, np.ndarray]:
+    validate_short_step_phases(phases)
+    message = JointTrajectory()
+    message.joint_names = list(SHORT_STEP_JOINT_NAMES)
+    elapsed = 0.0
+    for phase in phases:
+        elapsed += phase.duration
+        point = JointTrajectoryPoint()
+        point.positions = phase.positions.tolist()
+        if not coast_through_waypoints:
+            point.velocities = [0.0] * len(SHORT_STEP_JOINT_NAMES)
+            point.accelerations = [0.0] * len(SHORT_STEP_JOINT_NAMES)
+        seconds_to_point_time(point, elapsed)
+        message.points.append(point)
+    return message, elapsed, phases[-1].positions.copy()
+
+
+def build_short_step_trajectory(
+    cycles: int,
+    speed_scale: float,
+) -> tuple[JointTrajectory, float, np.ndarray]:
+    """Build the same sequential gait used by short_step_walk_demo."""
+    return build_phase_trajectory(make_short_step_phases(cycles, speed_scale))
+
+
 class WasdIkTeleop(Node):
     def __init__(self) -> None:
         super().__init__("wasd_ik_teleop")
         defaults = {
-            "linear_speed": 0.12,
-            "angular_speed": 0.55,
-            "stride_length": 0.050,
+            "linear_speed": 0.18,
+            "angular_speed": 0.75,
+            "stride_length": 0.075,
             "step_height": 0.030,
-            "command_timeout": 0.90,
+            "command_timeout": 3.00,
             "sprint_multiplier": 2.0,
-            "joint3_turn": 0.16,
-            "turn_stride_length": 0.020,
-            "turn_step_height": 0.025,
+            "joint3_turn": 0.24,
+            "turn_step_height": 0.050,
+            "step_frequency": 1.15,
+            "sprint_step_frequency": 1.75,
             "update_rate": 30.0,
-            "stabilization_gain": 4.0,
-            "height_gain": 4.0,
-            "max_vertical_speed": 0.15,
+            "balance_pitch_gain": 0.100,
+            "balance_pitch_damping": 0.020,
+            "balance_roll_gain": 0.070,
+            "balance_roll_damping": 0.015,
+            "balance_offset_limit": 0.045,
+            "balance_deadband_deg": 10.0,
+            "walking_pitch_deg": 7.0,
+            "walking_crouch": 0.020,
+            "walking_lean_shift": 0.060,
+            "walking_knee_bend": -0.350,
+            "joint1_pillar_center": 0.300,
+            "joint1_pillar_amplitude": 0.250,
+            "prelean_time": 0.45,
+            "command_ramp_time": 0.35,
+            "stop_ramp_time": 2.50,
             "keyboard": True,
             "input_topic": "/openleg/walk_cmd",
-            "model_velocity_topic": "/model/openleg/cmd_vel",
+            "imu_topic": "/imu",
+            "short_step_cycles": 1,
+            "short_step_speed_scale": 1.0,
+            "short_step_sprint_scale": 5.0,
+            "fixed_joint2_scale": DEFAULT_FIXED_JOINT2_SCALE,
         }
         for name, value in defaults.items():
             self.declare_parameter(name, value)
@@ -185,11 +442,55 @@ class WasdIkTeleop(Node):
         self.timeout = float(self.get_parameter("command_timeout").value)
         self.sprint_multiplier = float(self.get_parameter("sprint_multiplier").value)
         self.joint3_turn = float(self.get_parameter("joint3_turn").value)
-        self.turn_stride = float(self.get_parameter("turn_stride_length").value)
         self.turn_lift = float(self.get_parameter("turn_step_height").value)
-        self.stabilization_gain = float(self.get_parameter("stabilization_gain").value)
-        self.height_gain = float(self.get_parameter("height_gain").value)
-        self.max_vertical = float(self.get_parameter("max_vertical_speed").value)
+        self.step_frequency = float(self.get_parameter("step_frequency").value)
+        self.sprint_step_frequency = float(self.get_parameter("sprint_step_frequency").value)
+        self.pitch_gain = float(self.get_parameter("balance_pitch_gain").value)
+        self.pitch_damping = float(self.get_parameter("balance_pitch_damping").value)
+        self.roll_gain = float(self.get_parameter("balance_roll_gain").value)
+        self.roll_damping = float(self.get_parameter("balance_roll_damping").value)
+        self.balance_limit = float(self.get_parameter("balance_offset_limit").value)
+        self.balance_deadband = math.radians(
+            float(self.get_parameter("balance_deadband_deg").value)
+        )
+        self.walking_pitch = math.radians(
+            float(self.get_parameter("walking_pitch_deg").value)
+        )
+        self.walking_crouch = float(self.get_parameter("walking_crouch").value)
+        self.walking_lean_shift = float(
+            self.get_parameter("walking_lean_shift").value
+        )
+        self.walking_knee_bend = float(
+            self.get_parameter("walking_knee_bend").value
+        )
+        self.joint1_pillar_center = float(
+            self.get_parameter("joint1_pillar_center").value
+        )
+        self.joint1_pillar_amplitude = float(
+            self.get_parameter("joint1_pillar_amplitude").value
+        )
+        self.command_ramp_time = max(
+            float(self.get_parameter("command_ramp_time").value), 0.05
+        )
+        self.stop_ramp_time = max(
+            float(self.get_parameter("stop_ramp_time").value), 0.05
+        )
+        self.prelean_time = max(
+            float(self.get_parameter("prelean_time").value), 0.05
+        )
+
+        self.short_step_cycles = max(
+            1, min(10, int(self.get_parameter("short_step_cycles").value))
+        )
+        self.short_step_speed_scale = float(
+            np.clip(self.get_parameter("short_step_speed_scale").value, FIXED_GAIT_MIN_SPEED_SCALE, FIXED_GAIT_MAX_SPEED_SCALE)
+        )
+        self.short_step_sprint_scale = float(
+            np.clip(self.get_parameter("short_step_sprint_scale").value, FIXED_GAIT_MIN_SPEED_SCALE, FIXED_GAIT_MAX_SPEED_SCALE)
+        )
+        self.fixed_joint2_scale = float(np.clip(
+            self.get_parameter("fixed_joint2_scale").value, 0.5, 1.0
+        ))
 
         robot = load_robot()
         self.left = LegKinematics("left", robot)
@@ -199,17 +500,25 @@ class WasdIkTeleop(Node):
         self.trajectory_pub = self.create_publisher(
             JointTrajectory, "/leg_controller/joint_trajectory", 10
         )
-        self.velocity_pub = self.create_publisher(
-            Twist, str(self.get_parameter("model_velocity_topic").value), 10
+        self.measured_q = np.zeros(12)
+        self.have_joint_state = False
+        self.joint_state_sub = self.create_subscription(
+            JointState,
+            "/joint_states",
+            self.joint_state_callback,
+            qos_profile_sensor_data,
         )
-        self.pose_z = None
-        self.target_z = None
         self.roll = 0.0
         self.pitch = 0.0
-        self.yaw = 0.0
-        self.target_yaw = None
-        self.odometry_sub = self.create_subscription(
-            Odometry, "/model/openleg/odometry", self.odometry_callback, 10
+        self.roll_rate = 0.0
+        self.pitch_rate = 0.0
+        self.imu_received = False
+        self.feedback_time: float | None = None
+        self.imu_sub = self.create_subscription(
+            Imu,
+            str(self.get_parameter("imu_topic").value),
+            self.imu_callback,
+            qos_profile_sensor_data,
         )
         self.command_sub = self.create_subscription(
             Twist,
@@ -220,11 +529,19 @@ class WasdIkTeleop(Node):
 
         self.forward = 0.0
         self.turn = 0.0
+        self.gait_forward = 0.0
+        self.gait_turn = 0.0
         self.forward_deadline = 0.0
         self.turn_deadline = 0.0
+        self.prelean_direction = 0.0
+        self.prelean_started = time.monotonic()
         self.phase = 0.0
         self.last_update = time.monotonic()
         self.exit_requested = False
+        self.fixed_active_until = 0.0
+        self.fixed_holding = True
+        self.fixed_gait_kind: str | None = None
+        self.queued_fixed_command: tuple[str, bool] | None = None
         self.lock = threading.Lock()
         rate = float(self.get_parameter("update_rate").value)
         self.timer = self.create_timer(1.0 / rate, self.update)
@@ -232,42 +549,67 @@ class WasdIkTeleop(Node):
         if bool(self.get_parameter("keyboard").value) and sys.stdin.isatty():
             threading.Thread(target=self.keyboard_loop, daemon=True).start()
             self.get_logger().info(
-                "W/S forward/back, A/D turn, Shift+key sprint, SPACE stop, Q quit."
+                "W/S fixed two-step gait, A/D fixed 10-degree turn; "
+                "Shift+W uses 2.5x support / 5x swing, Shift+S uses "
+                "2x support / 5x swing, Shift+A/D stays at 1.5x; "
+                "SPACE hold, Q quit."
             )
         elif bool(self.get_parameter("keyboard").value):
             self.get_logger().warning(
                 "No terminal; publish Twist to /openleg/walk_cmd instead."
             )
         self.get_logger().info(
-            f"IK loaded from current URDF; feet L={np.round(self.left.nominal, 4)}, "
+            f"Fixed W/S/A/D gaits and URDF IK loaded; feet L="
+            f"{np.round(self.left.nominal, 4)}, "
             f"R={np.round(self.right.nominal, 4)}"
         )
 
-    def odometry_callback(self, message: Odometry) -> None:
-        pose = message.pose.pose
-        q = pose.orientation
+    def control_time(self) -> float:
+        return self.feedback_time if self.feedback_time is not None else time.monotonic()
+
+    def joint_state_callback(self, message: JointState) -> None:
+        positions = dict(zip(message.name, message.position))
+        if not all(name in positions for name in SHORT_STEP_JOINT_NAMES):
+            return
+        measured = np.asarray([
+            positions[name] for name in SHORT_STEP_JOINT_NAMES
+        ])
+        with self.lock:
+            self.measured_q = measured
+            self.have_joint_state = True
+
+    def imu_callback(self, message: Imu) -> None:
+        feedback_time = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+        if self.feedback_time is None:
+            self.last_update = feedback_time
+            self.prelean_started = feedback_time
+        self.feedback_time = feedback_time
+        q = message.orientation
         self.roll = math.atan2(
             2.0 * (q.w * q.x + q.y * q.z),
             1.0 - 2.0 * (q.x * q.x + q.y * q.y),
         )
         pitch_sine = 2.0 * (q.w * q.y - q.z * q.x)
         self.pitch = math.asin(float(np.clip(pitch_sine, -1.0, 1.0)))
-        self.yaw = math.atan2(
-            2.0 * (q.w * q.z + q.x * q.y),
-            1.0 - 2.0 * (q.y * q.y + q.z * q.z),
-        )
-        self.pose_z = pose.position.z
-        if self.target_z is None:
-            self.target_z = self.pose_z
-            self.target_yaw = self.yaw
+        self.roll_rate = message.angular_velocity.x
+        self.pitch_rate = message.angular_velocity.y
+        if not self.imu_received:
+            self.imu_received = True
             self.get_logger().info(
-                f"Stabilizing pelvis at z={self.target_z:.3f} m, roll=0, pitch=0"
+                "Base IMU feedback active; balance corrections now use leg joints only."
             )
 
-
     def set_command(self, forward: float | None, turn: float | None) -> None:
-        now = time.monotonic()
+        now = self.control_time()
         with self.lock:
+            if self.fixed_active_until > 0.0 or self.fixed_holding:
+                self.fixed_active_until = 0.0
+                self.fixed_holding = False
+                self.fixed_gait_kind = None
+                self.queued_fixed_command = None
+                if self.have_joint_state:
+                    self.left_q = self.measured_q[:6].copy()
+                    self.right_q = self.measured_q[6:].copy()
             if forward is not None:
                 maximum = self.speed * self.sprint_multiplier
                 self.forward = float(np.clip(forward, -maximum, maximum))
@@ -276,6 +618,167 @@ class WasdIkTeleop(Node):
                 maximum = self.turn_speed * self.sprint_multiplier
                 self.turn = float(np.clip(turn, -maximum, maximum))
                 self.turn_deadline = now + self.timeout
+
+    def fixed_speed_scale(self, sprint: bool) -> float:
+        return (
+            self.short_step_sprint_scale if sprint else self.short_step_speed_scale
+        )
+
+    def start_fixed_phases(
+        self,
+        phases,
+        label: str,
+        coast_through_waypoints: bool = False,
+        gait_kind: str | None = None,
+    ) -> None:
+        message, duration, final_positions = build_phase_trajectory(
+            phases, coast_through_waypoints=coast_through_waypoints
+        )
+        now = self.control_time()
+        with self.lock:
+            if self.fixed_active_until > now:
+                self.get_logger().warning(
+                    "A fixed gait is already active; key ignored.",
+                    throttle_duration_sec=1.0,
+                )
+                return
+            self.forward = 0.0
+            self.turn = 0.0
+            self.gait_forward = 0.0
+            self.gait_turn = 0.0
+            self.forward_deadline = now
+            self.turn_deadline = now
+            self.fixed_active_until = now + duration
+            self.fixed_holding = False
+            self.fixed_gait_kind = gait_kind
+            self.queued_fixed_command = None
+            self.left_q = final_positions[:6].copy()
+            self.right_q = final_positions[6:].copy()
+        self.trajectory_pub.publish(message)
+        self.get_logger().info(
+            f"Started {label}; trajectory endpoint in {duration:.2f} seconds."
+        )
+
+    def queue_continuation_if_active(self, gait_kind: str, sprint: bool) -> bool:
+        now = self.control_time()
+        queued = False
+        with self.lock:
+            if self.fixed_active_until <= now:
+                return False
+            if self.fixed_gait_kind == gait_kind:
+                self.queued_fixed_command = (gait_kind, sprint)
+                queued = True
+        if queued:
+            self.get_logger().info(
+                f"Queued one {gait_kind} continuation without a center reset.",
+                throttle_duration_sec=1.0,
+            )
+        else:
+            self.get_logger().warning(
+                "Opposite or turning command ignored until this pair finishes.",
+                throttle_duration_sec=1.0,
+            )
+        return True
+
+    def continuation_ready(self, gait_kind: str) -> bool:
+        now = self.control_time()
+        with self.lock:
+            expired = (
+                self.fixed_active_until > 0.0
+                and self.fixed_active_until <= now
+            )
+            return (
+                self.fixed_gait_kind == gait_kind
+                and (self.fixed_holding or expired)
+            )
+
+    def start_short_step(self, sprint: bool = False) -> None:
+        if self.queue_continuation_if_active("forward", sprint):
+            return
+        speed_scale = self.fixed_speed_scale(sprint)
+        continuing = self.continuation_ready("forward")
+        phase_builder = (
+            make_short_step_continuation if continuing else make_short_step_phases
+        )
+        phases = phase_builder(
+            self.short_step_cycles, speed_scale, self.fixed_joint2_scale
+        )
+        timing = (
+            f"overlap (2.5x support, {speed_scale:.2f}x swing)"
+            if sprint else f"at {speed_scale:.2f}x"
+        )
+        prefix = "continued " if continuing else ""
+        self.start_fixed_phases(
+            phases,
+            f"{2 * self.short_step_cycles}-step {prefix}forward gait {timing}",
+            coast_through_waypoints=sprint,
+            gait_kind="forward",
+        )
+
+    def start_backward_step(self, sprint: bool = False) -> None:
+        if self.queue_continuation_if_active("backward", sprint):
+            return
+        speed_scale = self.fixed_speed_scale(sprint)
+        continuing = self.continuation_ready("backward")
+        phase_builder = (
+            make_backward_continuation if continuing else make_backward_phases
+        )
+        phases = phase_builder(
+            self.short_step_cycles, speed_scale, self.fixed_joint2_scale
+        )
+        timing = (
+            f"overlap (2.0x support, {speed_scale:.2f}x swing)"
+            if sprint else f"at {speed_scale:.2f}x"
+        )
+        prefix = "continued " if continuing else ""
+        self.start_fixed_phases(
+            phases,
+            f"{2 * self.short_step_cycles}-step {prefix}backward gait {timing}",
+            coast_through_waypoints=sprint,
+            gait_kind="backward",
+        )
+
+    def start_turn(self, left: bool, sprint: bool = False) -> None:
+        requested_scale = self.fixed_speed_scale(sprint)
+        turn_scale = min(requested_scale, 1.5)
+        phases = make_turn_phases(
+            left, turn_scale, self.fixed_joint2_scale
+        )
+        direction = "left" if left else "right"
+        self.start_fixed_phases(
+            phases,
+            f"10-degree {direction} turn at {turn_scale:.2f}x",
+            coast_through_waypoints=False,
+            gait_kind=f"turn-{direction}",
+        )
+
+    def stop_motion(self) -> None:
+        now = self.control_time()
+        with self.lock:
+            self.forward = 0.0
+            self.turn = 0.0
+            self.gait_forward = 0.0
+            self.gait_turn = 0.0
+            self.forward_deadline = now
+            self.turn_deadline = now
+            self.fixed_active_until = 0.0
+            self.fixed_holding = True
+            self.fixed_gait_kind = None
+            self.queued_fixed_command = None
+            positions = (
+                self.measured_q.copy()
+                if self.have_joint_state
+                else np.concatenate([self.left_q, self.right_q])
+            )
+        message = JointTrajectory()
+        message.joint_names = list(SHORT_STEP_JOINT_NAMES)
+        point = JointTrajectoryPoint()
+        point.positions = positions.tolist()
+        point.velocities = [0.0] * len(SHORT_STEP_JOINT_NAMES)
+        point.accelerations = [0.0] * len(SHORT_STEP_JOINT_NAMES)
+        point.time_from_start.nanosec = 200_000_000
+        message.points = [point]
+        self.trajectory_pub.publish(message)
 
     def keyboard_loop(self) -> None:
         descriptor = sys.stdin.fileno()
@@ -290,103 +793,265 @@ class WasdIkTeleop(Node):
                 boost = self.sprint_multiplier if raw_key.isupper() else 1.0
                 key = raw_key.lower()
                 if key == "w":
-                    self.set_command(self.speed * boost, None)
+                    self.start_short_step(sprint=boost > 1.0)
                 elif key == "s":
-                    self.set_command(-self.speed * boost, None)
+                    self.start_backward_step(sprint=boost > 1.0)
                 elif key == "a":
-                    self.set_command(None, self.turn_speed * boost)
+                    self.start_turn(left=True, sprint=boost > 1.0)
                 elif key == "d":
-                    self.set_command(None, -self.turn_speed * boost)
+                    self.start_turn(left=False, sprint=boost > 1.0)
                 elif key in (" ", "x"):
-                    self.set_command(0.0, 0.0)
+                    self.stop_motion()
                 elif key == "q":
-                    self.set_command(0.0, 0.0)
+                    self.stop_motion()
                     self.exit_requested = True
         finally:
             termios.tcsetattr(descriptor, termios.TCSADRAIN, previous)
 
     def target(
-        self, leg: LegKinematics, phase: float, forward: float, turn: float
+        self, leg: LegKinematics, phase: float, forward: float,
+        turn: float, balance: np.ndarray, joint3: float, crouch: float,
+        lean_shift: float,
     ) -> np.ndarray:
         result = leg.nominal.copy()
         wave = math.sin(phase)
-        stride_ratio = float(np.clip(forward / self.speed, -1.4, 1.4))
-        turn_ratio = float(np.clip(turn / self.turn_speed, -1.4, 1.4))
+        stride_ratio = float(np.clip(forward / self.speed, -1.35, 1.35))
         forward_weight = min(abs(stride_ratio), 1.0)
+        lift_wave = max(0.0, wave)
 
-        result[0] += self.stride * stride_ratio * wave
-        result[0] += (
-            self.turn_stride
-            * abs(turn_ratio)
-            * (1.0 - forward_weight)
-            * wave
-        )
-        lift = self.turn_lift + (self.lift - self.turn_lift) * forward_weight
-        result[2] += lift * max(0.0, wave)
+        if abs(turn) > 1e-4:
+            turned_pose = leg.zero.copy()
+            turned_pose[2] = joint3
+            turn_lift_scale = (
+                self.turn_lift
+                / 0.050
+                * (1.0 - forward_weight)
+                * lift_wave
+            )
+            turned_pose[0] = 0.30 * turn_lift_scale
+            turned_pose[3] = -1.05 * turn_lift_scale
+            turned_pose[4] = 0.42 * turn_lift_scale
+            result = leg.forward(turned_pose)[0]
+
+        # The CAD model faces -base X, so positive W uses a negative-X stride.
+        result[0] -= self.stride * stride_ratio * wave
+        result[2] += self.lift * forward_weight * lift_wave
+        result[2] += crouch
+        result[0] += lean_shift
+        result[0] += balance[0]
+        result[1] += balance[1]
         return result
 
+    def balance_offsets(self) -> np.ndarray:
+        if not self.imu_received:
+            return np.zeros(2)
+        pitch_error = math.copysign(
+            max(abs(self.pitch) - self.balance_deadband, 0.0), self.pitch
+        )
+        roll_error = math.copysign(
+            max(abs(self.roll) - self.balance_deadband, 0.0), self.roll
+        )
+        transition = math.radians(5.0)
+        pitch_activation = min(abs(pitch_error) / transition, 1.0)
+        roll_activation = min(abs(roll_error) / transition, 1.0)
+        forward = float(np.clip(
+            self.pitch_gain * pitch_error
+            + self.pitch_damping * self.pitch_rate * pitch_activation,
+            -self.balance_limit, self.balance_limit,
+        ))
+        lateral = float(np.clip(
+            -self.roll_gain * roll_error
+            - self.roll_damping * self.roll_rate * roll_activation,
+            -self.balance_limit, self.balance_limit,
+        ))
+        return np.asarray([forward, lateral])
+
     def update(self) -> None:
-        now = time.monotonic()
+        now = self.control_time()
         dt = min(max(now - self.last_update, 0.0), 0.1)
         self.last_update = now
+        if self.exit_requested:
+            rclpy.shutdown()
+            return
+        queued_fixed_command = None
         with self.lock:
-            forward = self.forward if now <= self.forward_deadline else 0.0
-            turn = self.turn if now <= self.turn_deadline else 0.0
+            if self.fixed_active_until > 0.0:
+                if now <= self.fixed_active_until:
+                    return
+                self.fixed_active_until = 0.0
+                self.fixed_holding = True
+                queued_fixed_command = self.queued_fixed_command
+                self.queued_fixed_command = None
+            if self.fixed_holding and queued_fixed_command is None:
+                return
+            requested_forward = self.forward if now <= self.forward_deadline else 0.0
+            requested_turn = self.turn if now <= self.turn_deadline else 0.0
 
-        velocity = Twist()
-        velocity.linear.x = forward
-        velocity.angular.z = turn
-        if self.target_yaw is not None:
-            self.target_yaw += turn * dt
-        if self.pose_z is not None and self.target_z is not None:
-            velocity.linear.z = float(np.clip(
-                self.height_gain * (self.target_z - self.pose_z),
-                -self.max_vertical,
-                self.max_vertical,
+        if queued_fixed_command is not None:
+            gait_kind, sprint = queued_fixed_command
+            if gait_kind == "forward":
+                self.start_short_step(sprint=sprint)
+            elif gait_kind == "backward":
+                self.start_backward_step(sprint=sprint)
+            return
+
+        requested_direction = (
+            0.0
+            if abs(requested_forward) <= 1e-4
+            else math.copysign(1.0, requested_forward)
+        )
+        if requested_direction != self.prelean_direction:
+            self.prelean_direction = requested_direction
+            self.prelean_started = now
+
+        gait_requested_forward = requested_forward
+        gait_requested_turn = requested_turn
+        lean_ratio = 0.0
+        if requested_direction != 0.0:
+            prelean_progress = float(np.clip(
+                (now - self.prelean_started) / self.prelean_time, 0.0, 1.0
             ))
-            velocity.angular.x = float(np.clip(
-                -self.stabilization_gain * self.roll, -1.5, 1.5
+            lean_ratio = (
+                float(np.clip(requested_forward / self.speed, -1.0, 1.0))
+                * prelean_progress
+            )
+
+        forward_ramp_time = (
+            self.stop_ramp_time
+            if abs(gait_requested_forward) <= 1e-4
+            else self.command_ramp_time
+        )
+        turn_ramp_time = (
+            self.stop_ramp_time
+            if abs(gait_requested_turn) <= 1e-4
+            else self.command_ramp_time
+        )
+        forward_step = self.speed * dt / forward_ramp_time
+        turn_step = self.turn_speed * dt / turn_ramp_time
+        self.gait_forward += float(np.clip(
+            gait_requested_forward - self.gait_forward, -forward_step, forward_step
+        ))
+        self.gait_turn += float(np.clip(
+            gait_requested_turn - self.gait_turn, -turn_step, turn_step
+        ))
+        forward = self.gait_forward
+        turn = self.gait_turn
+        if requested_direction == 0.0:
+            lean_ratio = float(np.clip(forward / self.speed, -1.0, 1.0))
+        moving = abs(forward) > 1e-4 or abs(turn) > 1e-4
+        if moving:
+            command_ratio = max(
+                abs(forward / self.speed),
+                abs(turn / self.turn_speed),
+            )
+            sprint_range = max(self.sprint_multiplier - 1.0, 1e-6)
+            sprint_ratio = float(np.clip(
+                (command_ratio - 1.0) / sprint_range,
+                0.0, 1.0,
             ))
-            yaw_error = math.atan2(
-                math.sin(self.target_yaw - self.yaw),
-                math.cos(self.target_yaw - self.yaw),
+            frequency = (
+                self.step_frequency
+                + sprint_ratio * (self.sprint_step_frequency - self.step_frequency)
             )
-            velocity.angular.z = float(np.clip(
-                turn + self.stabilization_gain * yaw_error, -1.5, 1.5
-            ))
-            velocity.angular.y = float(np.clip(
-                -self.stabilization_gain * self.pitch, -1.5, 1.5
-            ))
-        self.velocity_pub.publish(velocity)
-        if abs(forward) > 1e-4 or abs(turn) > 1e-4:
-            pace = (
-                2.2
-                + 3.0 * abs(forward / self.speed)
-                + 1.5 * abs(turn / self.turn_speed)
-            )
-            self.phase = (self.phase + pace * dt) % (2.0 * math.pi)
-            turn_ratio = float(np.clip(turn / self.turn_speed, -1.0, 1.0))
-            left_joint3 = -self.joint3_turn * turn_ratio
-            right_joint3 = self.joint3_turn * turn_ratio
-            self.left_q, left_error = self.left.solve(
-                self.target(self.left, self.phase, forward, turn),
-                self.left_q,
-                left_joint3,
-            )
-            self.right_q, right_error = self.right.solve(
-                self.target(self.right, self.phase + math.pi, forward, turn),
-                self.right_q,
-                right_joint3,
-            )
-            if max(left_error, right_error) > 0.008:
-                self.get_logger().warning(
-                    f"IK residual high: L={left_error:.3f} m R={right_error:.3f} m",
-                    throttle_duration_sec=2.0,
-                )
+            startup_frequency_scale = 0.70 + 0.30 * min(command_ratio, 1.0)
+            frequency *= startup_frequency_scale
+            self.phase = (self.phase + 2.0 * math.pi * frequency * dt) % (2.0 * math.pi)
         else:
-            self.left_q *= 0.82
-            self.right_q *= 0.82
             self.phase = 0.0
+
+        left_phase = self.phase
+        right_phase = self.phase + math.pi
+        turn_ratio = float(np.clip(turn / self.turn_speed, -1.35, 1.35))
+        left_joint3 = (
+            -self.joint3_turn
+            * turn_ratio
+            * 0.5
+            * (1.0 + math.cos(left_phase))
+        )
+        right_joint3 = (
+            self.joint3_turn
+            * turn_ratio
+            * 0.5
+            * (1.0 + math.cos(right_phase))
+        )
+
+        # Positive joint-chain pitch produces the observed forward body lean.
+        target_pitch = self.walking_pitch * lean_ratio
+        walking_lean_shift = self.walking_lean_shift * lean_ratio
+        walking_knee_bend = self.walking_knee_bend * abs(lean_ratio)
+        walking_crouch = self.walking_crouch * abs(lean_ratio)
+        left_wave = math.sin(left_phase)
+        right_wave = math.sin(right_phase)
+        forward_active = abs(forward) > 1e-4
+        left_swing = forward_active and left_wave > 1e-4
+        right_swing = forward_active and right_wave > 1e-4
+        left_pitch_target = None if left_swing else target_pitch
+        right_pitch_target = None if right_swing else target_pitch
+        left_knee_target = (
+            None if left_swing
+            else walking_knee_bend * (1.0 - max(0.0, -left_wave))
+        )
+        right_knee_target = (
+            None if right_swing
+            else walking_knee_bend * (1.0 - max(0.0, -right_wave))
+        )
+        forward_weight = min(abs(forward / self.speed), 1.0)
+        travel_direction = math.copysign(1.0, forward) if forward_active else 0.0
+        left_joint1_target = None
+        right_joint1_target = None
+        if forward_active:
+            left_joint1_target = (
+                self.joint1_pillar_center
+                + self.joint1_pillar_amplitude
+                * travel_direction * left_wave * forward_weight
+            )
+            right_joint1_target = (
+                self.joint1_pillar_center
+                + self.joint1_pillar_amplitude
+                * travel_direction * right_wave * forward_weight
+            )
+        balance = self.balance_offsets()
+        left_balance = balance.copy()
+        right_balance = balance.copy()
+        left_locked = {2: left_joint3}
+        right_locked = {2: right_joint3}
+        if abs(turn) > 1e-4 and abs(forward) <= 1e-4:
+            left_locked[1] = 0.0
+            right_locked[1] = 0.0
+            left_balance[1] = 0.0
+            right_balance[1] = 0.0
+
+        self.left_q, left_error = self.left.solve(
+            self.target(
+                self.left, left_phase, forward, turn, left_balance, left_joint3,
+                walking_crouch, walking_lean_shift,
+            ),
+            self.left_q,
+            left_locked,
+            left_pitch_target,
+            0.20,
+            left_knee_target,
+            0.08,
+            left_joint1_target,
+        )
+        self.right_q, right_error = self.right.solve(
+            self.target(
+                self.right, right_phase, forward, turn, right_balance, right_joint3,
+                walking_crouch, walking_lean_shift,
+            ),
+            self.right_q,
+            right_locked,
+            right_pitch_target,
+            0.20,
+            right_knee_target,
+            0.08,
+            right_joint1_target,
+        )
+        if max(left_error, right_error) > 0.008:
+            self.get_logger().warning(
+                f"IK residual high: L={left_error:.3f} m R={right_error:.3f} m",
+                throttle_duration_sec=2.0,
+            )
 
         message = JointTrajectory()
         point = JointTrajectoryPoint()
@@ -398,12 +1063,81 @@ class WasdIkTeleop(Node):
         if self.exit_requested:
             rclpy.shutdown()
 
-    def stop(self) -> None:
-        for _ in range(3):
-            self.velocity_pub.publish(Twist())
-
 
 def self_test() -> int:
+    expected_phases = make_short_step_phases(1, 5.0)
+    maximum_joint2 = max(
+        np.max(np.abs(phase.positions[[1, 7]]))
+        for phase in expected_phases
+    )
+    if maximum_joint2 > 0.130:
+        return 1
+    trajectory, duration, final_positions = build_phase_trajectory(
+        expected_phases, coast_through_waypoints=True
+    )
+    if trajectory.joint_names != list(SHORT_STEP_JOINT_NAMES):
+        return 1
+    if len(trajectory.points) != len(expected_phases) or duration <= 0.0:
+        return 1
+    if not np.allclose(trajectory.points[-1].positions, final_positions):
+        return 1
+    print(
+        f"short-step W: {len(trajectory.points)} points, "
+        f"duration={duration:.2f} seconds, "
+        f"max Joint2={math.degrees(maximum_joint2):.2f} deg"
+    )
+
+    continuation_cases = (
+        ("forward", make_short_step_phases, make_short_step_continuation),
+        ("backward", make_backward_phases, make_backward_continuation),
+    )
+    for name, full_builder, continuation_builder in continuation_cases:
+        full_phases = full_builder(1, 5.0)
+        continuation_phases = continuation_builder(1, 5.0)
+        full_duration = sum(phase.duration for phase in full_phases)
+        continuation_duration = sum(
+            phase.duration for phase in continuation_phases
+        )
+        if not continuation_phases[0].label.startswith(
+            "continuation 1: lift right foot vertically"
+        ):
+            return 1
+        if any(
+            "prepare planted stance" in phase.label.lower()
+            for phase in continuation_phases
+        ):
+            return 1
+        if continuation_duration >= full_duration:
+            return 1
+        if continuation_phases[-1].duration > 0.150001:
+            return 1
+        if not np.allclose(
+            continuation_phases[-1].positions, full_phases[-1].positions
+        ):
+            return 1
+        print(
+            f"{name} continuation: {len(continuation_phases)} points, "
+            f"duration={continuation_duration:.2f} seconds"
+        )
+
+    directional = (
+        ("backward", make_backward_phases(1, 5.0), True),
+        ("turn-left", make_turn_phases(True, 5.0), False),
+        ("turn-right", make_turn_phases(False, 5.0), False),
+    )
+    for name, phases, coast in directional:
+        message, directional_duration, final = build_phase_trajectory(
+            phases, coast_through_waypoints=coast
+        )
+        if len(message.points) != len(phases) or directional_duration <= 0.0:
+            return 1
+        if not np.allclose(message.points[-1].positions, final):
+            return 1
+        print(
+            f"{name}: {len(message.points)} points, "
+            f"duration={directional_duration:.2f} seconds"
+        )
+
     robot = load_robot()
     for side in ("left", "right"):
         leg = LegKinematics(side, robot)
@@ -414,6 +1148,37 @@ def self_test() -> int:
             f"residual={error:.6f}, q={np.round(positions, 4)}"
         )
         if error > 0.003 or np.any(positions < leg.lower) or np.any(positions > leg.upper):
+            return 1
+
+        pitch_target = math.radians(7.0)
+        pitch_positions, pitch_error = leg.solve(
+            leg.nominal + np.asarray([0.060, 0.0, 0.020]),
+            leg.zero, {2: 0.0}, pitch_target, 0.20, -0.350,
+        )
+        pitch_result = float(
+            pitch_positions[0] + pitch_positions[3] + pitch_positions[4]
+        )
+        print(
+            f"{side} lean: residual={pitch_error:.6f}, "
+            f"pitch={math.degrees(pitch_result):.3f} deg"
+        )
+        if pitch_error > 0.008 or abs(pitch_result - pitch_target) > 0.030:
+            return 1
+
+        joint3_target = -0.20 if side == "left" else 0.20
+        turn_pose = leg.zero.copy()
+        turn_pose[2] = joint3_target
+        turn_target = leg.forward(turn_pose)[0]
+        turn_positions, turn_error = leg.solve(
+            turn_target, leg.zero, {1: 0.0, 2: joint3_target}
+        )
+        print(
+            f"{side} turn: residual={turn_error:.6f}, "
+            f"joint2={turn_positions[1]:.4f}, joint3={turn_positions[2]:.4f}"
+        )
+        if turn_error > 0.001 or abs(turn_positions[1]) > 1e-9:
+            return 1
+        if abs(turn_positions[2] - joint3_target) > 1e-9:
             return 1
     return 0
 
@@ -428,8 +1193,6 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        if rclpy.ok():
-            node.stop()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
