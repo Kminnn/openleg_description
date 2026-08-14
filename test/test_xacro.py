@@ -59,5 +59,5 @@ def test_gazebo_model_uses_physics_and_base_imu():
         "./world/model[@name='ground_plane']/link/collision"
     )
     assert ground_collision is not None
-    assert ground_collision.findtext("./surface/friction/ode/mu") == "1.2"
-    assert ground_collision.findtext("./surface/friction/ode/mu2") == "1.2"
+    assert ground_collision.findtext("./surface/friction/ode/mu") == "0.9"
+    assert ground_collision.findtext("./surface/friction/ode/mu2") == "0.9"
