@@ -28,6 +28,8 @@ leg_controller:
       - right_joint4
       - right_joint5
       - right_joint6
+      - waist_joint
+      - torso_pitch_joint
     command_interfaces:
       - position
     state_interfaces:
