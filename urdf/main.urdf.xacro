@@ -5,10 +5,6 @@
 
   <!-- Change these dimensions first when adapting the model to the real hardware. -->
   <xacro:property name="base_mass" value="${4.264361 + 0.5}"/>
-  <!-- EDITABLE: replace with the measured upper-body inertial data. -->
-  <xacro:property name="upper_body_mass" value="3.4"/>
-  <!-- EDITABLE: replace with the measured torso inertial data. -->
-  <xacro:property name="torso_mass" value="5.5"/>
   <xacro:property name="pelvis_x" value="0.18"/>
   <xacro:property name="pelvis_y" value="0.23358873"/>
   <xacro:property name="pelvis_z" value="0.26"/>
@@ -94,8 +90,6 @@
       <xacro:position_controlled_joint joint_name="right_joint4"/>
       <xacro:position_controlled_joint joint_name="right_joint5"/>
       <xacro:position_controlled_joint joint_name="right_joint6"/>
-      <xacro:position_controlled_joint joint_name="waist_joint"/>
-      <xacro:position_controlled_joint joint_name="torso_pitch_joint"/>
     </ros2_control>
 
     <!-- Simulated body IMU, mounted 180 mm above the base-link origin. -->
@@ -109,14 +103,6 @@
         <update_rate>100</update_rate>
         <topic>/imu</topic>
       </sensor>
-    </gazebo>
-    <gazebo reference="upper_body_link">
-      <mu1>0.5</mu1><mu2>0.5</mu2>
-      <kp>200000</kp><kd>1000</kd><maxVel>0.05</maxVel><minDepth>0.001</minDepth>
-    </gazebo>
-    <gazebo reference="torso_link">
-      <mu1>0.5</mu1><mu2>0.5</mu2>
-      <kp>200000</kp><kd>1000</kd><maxVel>0.05</maxVel><minDepth>0.001</minDepth>
     </gazebo>
 
 
