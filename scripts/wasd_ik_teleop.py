@@ -39,6 +39,27 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 FIXED_GAIT_MIN_SPEED_SCALE = 0.5
 FIXED_GAIT_MAX_SPEED_SCALE = 5.0
+DEFAULT_FIXED_JOINT2_SCALE = 0.65
+
+
+def reduce_fixed_gait_joint2(
+    phases, joint2_scale: float = DEFAULT_FIXED_JOINT2_SCALE,
+) -> tuple[ShortStepPhase, ...]:
+    """Trade excessive hip roll for a small, natural support-side body roll.
+
+    The fixed keyframes predate the current, heavier upper body and lower
+    Joint2 effort limit. Scaling only the mirrored hip-roll joints while
+    retaining the ankle-roll targets lets the planted feet tilt the body into
+    support instead of translating an upright pelvis all the way over one
+    foot.
+    """
+    scale = float(np.clip(joint2_scale, 0.5, 1.0))
+    result = []
+    for phase in phases:
+        positions = phase.positions.copy()
+        positions[[1, 7]] *= scale
+        result.append(ShortStepPhase(phase.label, phase.duration, positions))
+    return tuple(result)
 
 
 def retime_fixed_phases(
@@ -82,23 +103,25 @@ def retime_fixed_phases(
 
 
 def make_short_step_phases(
-    cycles: int = 1, speed_scale: float = 1.0
+    cycles: int = 1, speed_scale: float = 1.0,
+    joint2_scale: float = DEFAULT_FIXED_JOINT2_SCALE,
 ) -> tuple[ShortStepPhase, ...]:
-    return retime_fixed_phases(
+    return reduce_fixed_gait_joint2(retime_fixed_phases(
         make_base_short_step_phases(cycles, speed_scale=1.0),
         speed_scale,
         support_scale=2.5,
-    )
+    ), joint2_scale)
 
 
 def make_backward_phases(
-    cycles: int = 1, speed_scale: float = 1.0
+    cycles: int = 1, speed_scale: float = 1.0,
+    joint2_scale: float = DEFAULT_FIXED_JOINT2_SCALE,
 ) -> tuple[ShortStepPhase, ...]:
-    return retime_fixed_phases(
+    return reduce_fixed_gait_joint2(retime_fixed_phases(
         make_base_backward_phases(cycles, speed_scale=1.0),
         speed_scale,
         support_scale=2.0,
-    )
+    ), joint2_scale)
 
 
 def make_continuation_template(base_builder, cycles: int) -> tuple[ShortStepPhase, ...]:
@@ -121,34 +144,37 @@ def make_continuation_template(base_builder, cycles: int) -> tuple[ShortStepPhas
 
 
 def make_short_step_continuation(
-    cycles: int = 1, speed_scale: float = 1.0
+    cycles: int = 1, speed_scale: float = 1.0,
+    joint2_scale: float = DEFAULT_FIXED_JOINT2_SCALE,
 ) -> tuple[ShortStepPhase, ...]:
-    return retime_fixed_phases(
+    return reduce_fixed_gait_joint2(retime_fixed_phases(
         make_continuation_template(make_base_short_step_phases, cycles),
         speed_scale,
         support_scale=2.5,
-    )
+    ), joint2_scale)
 
 
 def make_backward_continuation(
-    cycles: int = 1, speed_scale: float = 1.0
+    cycles: int = 1, speed_scale: float = 1.0,
+    joint2_scale: float = DEFAULT_FIXED_JOINT2_SCALE,
 ) -> tuple[ShortStepPhase, ...]:
-    return retime_fixed_phases(
+    return reduce_fixed_gait_joint2(retime_fixed_phases(
         make_continuation_template(make_base_backward_phases, cycles),
         speed_scale,
         support_scale=2.0,
-    )
+    ), joint2_scale)
 
 
 def make_turn_phases(
-    left: bool, speed_scale: float = 1.0
+    left: bool, speed_scale: float = 1.0,
+    joint2_scale: float = DEFAULT_FIXED_JOINT2_SCALE,
 ) -> tuple[ShortStepPhase, ...]:
-    return retime_fixed_phases(
+    return reduce_fixed_gait_joint2(retime_fixed_phases(
         make_base_turn_phases(left, speed_scale=1.0),
         min(float(speed_scale), 1.5),
         support_scale=1.5,
         final_hold_cap=None,
-    )
+    ), joint2_scale)
 
 
 def vector(text: str | None) -> np.ndarray:
@@ -405,6 +431,7 @@ class WasdIkTeleop(Node):
             "short_step_cycles": 1,
             "short_step_speed_scale": 1.0,
             "short_step_sprint_scale": 5.0,
+            "fixed_joint2_scale": DEFAULT_FIXED_JOINT2_SCALE,
         }
         for name, value in defaults.items():
             self.declare_parameter(name, value)
@@ -461,6 +488,9 @@ class WasdIkTeleop(Node):
         self.short_step_sprint_scale = float(
             np.clip(self.get_parameter("short_step_sprint_scale").value, FIXED_GAIT_MIN_SPEED_SCALE, FIXED_GAIT_MAX_SPEED_SCALE)
         )
+        self.fixed_joint2_scale = float(np.clip(
+            self.get_parameter("fixed_joint2_scale").value, 0.5, 1.0
+        ))
 
         robot = load_robot()
         self.left = LegKinematics("left", robot)
@@ -670,7 +700,9 @@ class WasdIkTeleop(Node):
         phase_builder = (
             make_short_step_continuation if continuing else make_short_step_phases
         )
-        phases = phase_builder(self.short_step_cycles, speed_scale)
+        phases = phase_builder(
+            self.short_step_cycles, speed_scale, self.fixed_joint2_scale
+        )
         timing = (
             f"overlap (2.5x support, {speed_scale:.2f}x swing)"
             if sprint else f"at {speed_scale:.2f}x"
@@ -691,7 +723,9 @@ class WasdIkTeleop(Node):
         phase_builder = (
             make_backward_continuation if continuing else make_backward_phases
         )
-        phases = phase_builder(self.short_step_cycles, speed_scale)
+        phases = phase_builder(
+            self.short_step_cycles, speed_scale, self.fixed_joint2_scale
+        )
         timing = (
             f"overlap (2.0x support, {speed_scale:.2f}x swing)"
             if sprint else f"at {speed_scale:.2f}x"
@@ -707,7 +741,9 @@ class WasdIkTeleop(Node):
     def start_turn(self, left: bool, sprint: bool = False) -> None:
         requested_scale = self.fixed_speed_scale(sprint)
         turn_scale = min(requested_scale, 1.5)
-        phases = make_turn_phases(left, turn_scale)
+        phases = make_turn_phases(
+            left, turn_scale, self.fixed_joint2_scale
+        )
         direction = "left" if left else "right"
         self.start_fixed_phases(
             phases,
@@ -1030,6 +1066,12 @@ class WasdIkTeleop(Node):
 
 def self_test() -> int:
     expected_phases = make_short_step_phases(1, 5.0)
+    maximum_joint2 = max(
+        np.max(np.abs(phase.positions[[1, 7]]))
+        for phase in expected_phases
+    )
+    if maximum_joint2 > 0.130:
+        return 1
     trajectory, duration, final_positions = build_phase_trajectory(
         expected_phases, coast_through_waypoints=True
     )
@@ -1041,7 +1083,8 @@ def self_test() -> int:
         return 1
     print(
         f"short-step W: {len(trajectory.points)} points, "
-        f"duration={duration:.2f} seconds"
+        f"duration={duration:.2f} seconds, "
+        f"max Joint2={math.degrees(maximum_joint2):.2f} deg"
     )
 
     continuation_cases = (

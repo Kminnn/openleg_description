@@ -48,7 +48,7 @@ Run the keyboard controller in a second terminal:
     source install/setup.bash
     ros2 run openleg_description wasd_ik_teleop
 
-`W` and `S` run fixed sequential forward and backward gaits. One press commands one complete right-left cycle, or two individual steps. `A` and `D` run fixed 10-degree left and right turns. Shift walking uses contact-aware overlap: Shift+W uses 2.5x support/touchdown timing with 5x unloaded swing timing, Shift+S uses 2x support/touchdown with 5x swing, and Shift+A/D retains the proven 1.5x turn. Lowercase commands retain 1.0x timing. `short_step_sprint_scale` controls unloaded Shift swing timing from 0.5-5.0 and defaults to 5.0. Set `short_step_cycles:=10` if one forward or backward keypress should run a complete 20-step sequence. While a W/S trajectory is active, pressing the same direction again queues exactly one continuation. It starts directly from the existing left-support endpoint and skips the center-reset and repeated initial weight shift; keyboard repeat can keep one pair queued for continuous walking. Opposite-direction and turn keys remain ignored until the active pair ends. Walking uses only a 0.15-second terminal hold between queued trajectories; `Space` clears both the active trajectory and any queued continuation.
+`W` and `S` run fixed sequential forward and backward gaits. One press commands one complete right-left cycle, or two individual steps. `A` and `D` run fixed 10-degree left and right turns. Shift walking uses contact-aware overlap: Shift+W uses 2.5x support/touchdown timing with 5x unloaded swing timing, Shift+S uses 2x support/touchdown with 5x swing, and Shift+A/D retains the proven 1.5x turn. Lowercase commands retain 1.0x timing. `short_step_sprint_scale` controls unloaded Shift swing timing from 0.5-5.0 and defaults to 5.0. `fixed_joint2_scale` defaults to 0.65, reducing the legacy fixed-gait hip-roll targets while retaining ankle roll for a more natural support-side body lean; it can be tuned from 0.5-1.0. Set `short_step_cycles:=10` if one forward or backward keypress should run a complete 20-step sequence. While a W/S trajectory is active, pressing the same direction again queues exactly one continuation. It starts directly from the existing left-support endpoint and skips the center-reset and repeated initial weight shift; keyboard repeat can keep one pair queued for continuous walking. Opposite-direction and turn keys remain ignored until the active pair ends. Walking uses only a 0.15-second terminal hold between queued trajectories; `Space` clears both the active trajectory and any queued continuation.
 
 `Space` (or `X`) cancels the active trajectory and holds the measured joint positions; `Q` holds and quits. Keyboard WASD does not use IMU correction. ROS `Twist` input on `/openleg/walk_cmd` remains the experimental continuous IK path.
 
@@ -119,7 +119,7 @@ Launch Gazebo on the NVIDIA GPU in the first terminal:
 
     cd ~/ros2_ws
     source install/setup.bash
-    __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ros2 launch openleg_description gazebo.launch.py spawn_z:=0.58
+    __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ros2 launch openleg_description gazebo.launch.py spawn_z:=0.50
 
 In a second terminal, choose exactly one sequence:
 

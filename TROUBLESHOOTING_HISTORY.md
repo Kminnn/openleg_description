@@ -16,7 +16,7 @@ The values below describe the repository state validated on 2026-07-22. Entries 
 | Surface friction | `mu1 = mu2 = 2.5` |
 | Restitution | 0.0 |
 | Gazebo position proportional gain | 0.2 |
-| Spawn height | `spawn_z:=0.58` |
+| Spawn height | `spawn_z:=0.50` |
 | Narrow high-knee gait | 20 steps in 150.00 s, 150 mm stance, 20 mm clearance, 30 mm placement; one right-left cycle dynamically stable |
 | IMU | 70 mm above `base_link`; not used by the fixed presentation gait |
 
@@ -85,7 +85,7 @@ Motor limits currently use the supplied peak ratings: J1, J2, J4, and J5 use 140
 ### 9. Robot spawned lying down or with feet below the floor
 
 - **Cause:** The model origin is not located at the bottom of the feet, so a low world Z intersects the ground during spawn.
-- **Solution:** Use `spawn_z:=0.58` with the current geometry.
+- **Solution:** Use `spawn_z:=0.50` with the current geometry.
 - **Status:** Solved for the current URDF dimensions.
 
 ### 10. WASD produced no movement
@@ -110,7 +110,7 @@ Motor limits currently use the supplied peak ratings: J1, J2, J4, and J5 use 140
 - **Solution:** Launch Gazebo with NVIDIA PRIME offload:
 
 ```bash
-__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ros2 launch openleg_description gazebo.launch.py spawn_z:=0.58
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ros2 launch openleg_description gazebo.launch.py spawn_z:=0.50
 ```
 
 - **Status:** Solved when an NVIDIA GPU and its driver are available.
@@ -249,7 +249,7 @@ __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optim
 - **Failure cause:** The original nominal pose places the foot centers 280.7 mm apart even though hip-mount spacing is zero. A fixed flight path therefore required excessive lateral COM travel. Narrow-flight tests corrected the lateral fall but still fell backward without feedback.
 - **Active correction:** The demo now settles to a 150 mm stance through Joint2, keeps the support leg fixed during every lift, uses 20 mm knee clearance and 30 mm alternating placements, and removes the unsuccessful flight commands.
 - **Safety checks:** All 12 joint limits and conservative spline peak speeds pass at `speed_scale:=1.1`; the largest predicted motor-speed ratio is below 0.08.
-- **Dynamic result:** One installed right-left cycle at `spawn_z:=0.58` remained upright and held unchanged for another 10 seconds at XYZ `[-0.0664, -0.0317, 0.5770]` m and RPY `[1.86, -10.64, -1.76]` degrees.
+- **Dynamic result:** One installed right-left cycle at `spawn_z:=0.50` remained upright and held unchanged for another 10 seconds at XYZ `[-0.0664, -0.0317, 0.5770]` m and RPY `[1.86, -10.64, -1.76]` degrees.
 - **Status:** The fall is corrected for the narrow high-knee cycle. True running flight remains unresolved and is not claimed.
 
 ## F. ROS launch and repository workflow
@@ -304,7 +304,7 @@ Terminal 1:
 ```bash
 cd ~/ros2_ws
 source install/setup.bash
-__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ros2 launch openleg_description gazebo.launch.py spawn_z:=0.58
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ros2 launch openleg_description gazebo.launch.py spawn_z:=0.50
 ```
 
 Terminal 2:
