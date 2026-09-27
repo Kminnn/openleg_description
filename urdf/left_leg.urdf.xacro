@@ -13,11 +13,19 @@
     </collision>
   </xacro:macro>
 
-  <!-- Mirrored six degree-of-freedom counterpart of the right leg. -->
+  <!-- Mirrored six degree-of-freedom counterpart of the right leg.
+       Joint origins mirror local Y at the base and local X from Link2 onward. -->
   <xacro:macro name="left_leg" params="parent hip_y link1_z upper_leg_length lower_leg_length foot_length foot_width foot_height foot_collision_width">
     <link name="left_link1">
       <xacro:left_link_mesh visual_filename="package://openleg_description/meshes/left_leg/Left_Link1.stl" collision_filename="package://openleg_description/meshes/left_leg/Left_Link1.stl" xyz="0 0 0" rpy="${pi / 2} 0 ${pi / 2}" scale="1 1 1" material="left_leg_blue"/>
-      <inertial><origin xyz="0.035 0 0"/><mass value="1.95"/><inertia ixx="0.003758080176" ixy="-0.000113110329" ixz="0.000018626355" iyy="0.002425144326" iyz="-0.000082610274" izz="0.002891882116"/></inertial>
+      <!-- Mirrored right_link1 inertial data across local Y; same mass and allowance. -->
+      <xacro:property name="left_link1_inertia_scale" value="${(1.674577 + 0.5) / 1.674577}"/>
+      <inertial>
+        <origin xyz="0.029177 0.000018 -0.001849" rpy="0 0 0"/>
+        <mass value="${1.674577 + 0.5}"/>
+        <inertia ixx="${0.003013000000 * left_link1_inertia_scale}" ixy="${-(-0.000000570932 * left_link1_inertia_scale)}" ixz="${-0.000074828761 * left_link1_inertia_scale}"
+                 iyy="${0.001887000000 * left_link1_inertia_scale}" iyz="${-(-0.000000030342 * left_link1_inertia_scale)}" izz="${0.002170000000 * left_link1_inertia_scale}"/>
+      </inertial>
     </link>
     <joint name="left_base_fixed_joint" type="fixed">
       <parent link="${parent}"/><child link="left_link1"/>
@@ -25,32 +33,44 @@
     </joint>
 
     <link name="left_link2">
-      <xacro:left_link_mesh visual_filename="package://openleg_description/meshes/left_leg/Left_Link2.stl" collision_filename="package://openleg_description/meshes/left_leg/Left_Link2.stl" xyz="0 0 0" rpy="0 ${pi} 0" scale="1 1 1" material="left_leg_blue"/>
-      <inertial><origin xyz="0 0.068 0"/><mass value="1.75"/><inertia ixx="0.003134759430" ixy="0.000015824529" ixz="0.000001019248" iyy="0.001856093868" iyz="-0.000000151933" izz="0.002351329675"/></inertial>
+      <xacro:left_link_mesh visual_filename="package://openleg_description/meshes/left_leg/Left_Link2.stl" collision_filename="package://openleg_description/meshes/left_leg/Left_Link2.stl" xyz="0 0 0" rpy="0 0 0" scale="1 1 1" material="left_leg_blue"/>
+      <!-- Mirrored right_link2 inertial data across local X; same mass and allowance. -->
+      <xacro:property name="left_link2_inertia_scale" value="${(1.760088 + 0.5) / 1.760088}"/>
+      <inertial>
+        <origin xyz="-0.001703 0.056011 0.048374" rpy="0 0 0"/>
+        <mass value="${1.760088 + 0.5}"/>
+        <inertia ixx="${0.003362000000 * left_link2_inertia_scale}" ixy="${-(-0.000012697179 * left_link2_inertia_scale)}" ixz="${-(-0.000018817964 * left_link2_inertia_scale)}"
+                 iyy="${0.002249000000 * left_link2_inertia_scale}" iyz="${-0.000324300000 * left_link2_inertia_scale}" izz="${0.002256000000 * left_link2_inertia_scale}"/>
+      </inertial>
     </link>
     <joint name="left_joint1" type="revolute">
       <parent link="left_link1"/><child link="left_link2"/>
       <origin xyz="0.064 0 0" rpy="0 ${pi} -${pi / 2}"/><axis xyz="0 -1 0"/>
-      <limit lower="-0.915" upper="${-0.915 + 5 * pi / 6}" effort="40" velocity="5.23599"/>
+      <limit lower="${-90 * pi / 180}" upper="${90 * pi / 180}" effort="40" velocity="5.23599"/>
       <dynamics damping="2.0" friction="0.05"/>
     </joint>
 
     <link name="left_link3">
       <xacro:left_link_mesh visual_filename="package://openleg_description/meshes/right_leg/Link3.stl" collision_filename="package://openleg_description/meshes/right_leg/Link3.stl" xyz="0 0 0" rpy="0 0 -${pi / 2}" scale="1 1 1" material="joint_dark"/>
+      <!-- Mirrored right_link3 inertial data across local X; same mass and allowance. -->
       <inertial><origin xyz="-0.001837 0 0.044592"/><mass value="0.25"/><inertia ixx="0.000271316138" ixy="0" ixz="0.000060712575" iyy="0.000291319338" iyz="0" izz="0.000136870384"/></inertial>
     </link>
     <joint name="left_joint2" type="revolute">
       <parent link="left_link2"/><child link="left_link3"/>
-      <origin xyz="0.027 0.075 0" rpy="0 0 0"/><axis xyz="1 0 0"/>
-      <limit lower="-${pi / 2}" upper="${5 * pi / 36}" effort="40" velocity="5.23599"/>
+      <origin xyz="0.027 0.060 0.055" rpy="0 0 0"/><axis xyz="1 0 0"/>
+      <limit lower="${-60 * pi / 180}" upper="${30 * pi / 180}" effort="40" velocity="5.23599"/>
       <dynamics damping="2.0" friction="0.05"/>
     </joint>
 
     <link name="left_link4">
       <xacro:left_link_mesh visual_filename="package://openleg_description/meshes/left_leg/Left_Link4.stl" collision_filename="package://openleg_description/meshes/left_leg/Left_Link4.stl" xyz="0 0 0" rpy="-${pi / 2} 0 -${pi / 2}" scale="1 1 1" material="left_leg_blue"/>
+      <!-- Mirrored right_link4 inertial data across local X; same mass and allowance. -->
+      <xacro:property name="left_link4_inertia_scale" value="${(2.826622 + 0.5) / 2.826622}"/>
       <inertial>
-        <origin xyz="0 -0.015 0.109"/><mass value="3.0"/>
-        <inertia ixx="0.011445270031" ixy="0.000000623481" ixz="0.000025390890" iyy="0.012149594340" iyz="0.001008737419" izz="0.003608626316"/>
+        <origin xyz="0.000012 -0.015481 0.108918" rpy="0 0 0"/>
+        <mass value="${2.826622 + 0.5}"/>
+        <inertia ixx="${0.010770000000 * left_link4_inertia_scale}" ixy="${-(-0.000000610697 * left_link4_inertia_scale)}" ixz="${-(-0.000024502364 * left_link4_inertia_scale)}"
+                 iyy="${0.011520000000 * left_link4_inertia_scale}" iyz="${0.000848900000 * left_link4_inertia_scale}" izz="${0.003316000000 * left_link4_inertia_scale}"/>
       </inertial>
     </link>
     <joint name="left_joint3" type="revolute">
@@ -61,27 +81,37 @@
     </joint>
 
     <link name="left_link5">
-      <xacro:left_link_mesh visual_filename="package://openleg_description/meshes/right_leg/Link5.stl" collision_filename="package://openleg_description/meshes/right_leg/Link5.stl" xyz="0 0 0" rpy="0 -${pi / 2} 0" scale="1 1 1" material="left_leg_blue"/>
+      <xacro:left_link_mesh visual_filename="package://openleg_description/meshes/left_leg/Left_Link5.stl" collision_filename="package://openleg_description/meshes/left_leg/Left_Link5.stl" xyz="0 0 0" rpy="0 -${pi / 2} 0" scale="1 1 1" material="left_leg_blue"/>
+      <!-- Mirrored right_link5 inertial data across local X; same mass and allowance. -->
+      <xacro:property name="left_link5_inertia_scale" value="${(2.580937 + 0.5) / 2.580937}"/>
       <inertial>
-        <origin xyz="0 -0.014 0.129"/><mass value="1.94"/>
-        <inertia ixx="0.014234679170" ixy="0.000000064992" ixz="0.000000364381" iyy="0.013200580905" iyz="-0.000299782976" izz="0.002755133233"/>
+        <origin xyz="-0.003961 -0.025956 0.151636" rpy="0 0 0"/>
+        <mass value="${2.580937 + 0.5}"/>
+        <inertia ixx="${0.014890000000 * left_link5_inertia_scale}" ixy="${-(0.000007623647 * left_link5_inertia_scale)}" ixz="${-(-0.000082304091 * left_link5_inertia_scale)}"
+                 iyy="${0.014170000000 * left_link5_inertia_scale}" iyz="${0.000764900000 * left_link5_inertia_scale}" izz="${0.002350000000 * left_link5_inertia_scale}"/>
       </inertial>
     </link>
     <joint name="left_joint4" type="revolute">
       <parent link="left_link4"/><child link="left_link5"/>
       <origin xyz="0 0.012 0.147"/><axis xyz="0 -1 0"/>
-      <limit lower="-${37 * pi / 72}" upper="${pi / 72}" effort="40" velocity="5.23599"/>
+      <limit lower="${-90 * pi / 180}" upper="${2 * pi / 180}" effort="40" velocity="5.23599"/>
       <dynamics damping="2.5" friction="0.05"/>
     </joint>
 
     <link name="left_link6">
-      <xacro:left_link_mesh visual_filename="package://openleg_description/meshes/left_leg/Left_Link6.stl" collision_filename="package://openleg_description/meshes/left_leg/Left_Link6.stl" xyz="0 0 0" rpy="0 0 ${pi}" scale="1 1 1" material="joint_dark"/>
-      <inertial><origin xyz="0.004103 0.040339 0.077124"/><mass value="0.95"/><inertia ixx="0.000921950313" ixy="0.000031496560" ixz="-0.000005576139" iyy="0.000789173374" iyz="-0.000027795258" izz="0.000781461582"/></inertial>
+      <xacro:left_link_mesh visual_filename="package://openleg_description/meshes/right_leg/Right_Link6.stl" collision_filename="package://openleg_description/meshes/right_leg/Right_Link6.stl" xyz="0 0 0" rpy="0 0 ${pi}" scale="1 1 1" material="joint_dark"/>
+      <!-- Mirrored right_link6 inertial data across local X; same mass and allowance. -->
+      <inertial>
+        <origin xyz="0 0.0185 -1.366e-13" rpy="0 0 0"/>
+        <mass value="0.079708"/>
+        <inertia ixx="0.000009707245" ixy="-6.107e-16" ixz="-7.369e-17"
+                 iyy="0.000006538190" iyz="0" izz="0.000014154792"/>
+      </inertial>
     </link>
     <joint name="left_joint5" type="revolute">
       <parent link="left_link5"/><child link="left_link6"/>
-      <origin xyz="0 -0.055 0.2"/><axis xyz="0 -1 0"/>
-      <limit lower="-${49 * pi / 360}" upper="${49 * pi / 360}" effort="30" velocity="4.18879"/>
+      <origin xyz="0 -0.0475 0.27"/><axis xyz="0 -1 0"/>
+      <limit lower="${-25 * pi / 180}" upper="${20 * pi / 180}" effort="30" velocity="4.18879"/>
       <dynamics damping="2.0" friction="0.04"/>
     </joint>
 
@@ -95,15 +125,19 @@
         <origin xyz="0 0 0" rpy="0 0 ${pi / 2}"/>
         <geometry><mesh filename="package://openleg_description/meshes/right_leg/Link7.stl" scale="1 1 1"/></geometry>
       </collision>
+      <!-- Mirrored right_link7 inertial data across local X; same mass and allowance. -->
+      <xacro:property name="left_link7_inertia_scale" value="${(0.714171 + 0.5) / 0.714171}"/>
       <inertial>
-        <origin xyz="0.010 0 0.052"/><mass value="0.5"/>
-        <inertia ixx="0.000532780431" ixy="0" ixz="0.000013684277" iyy="0.001459897118" iyz="0" izz="0.001621743391"/>
+        <origin xyz="0.019854 0 0.021463" rpy="0 0 0"/>
+        <mass value="${0.714171 + 0.5}"/>
+        <inertia ixx="${0.000589000000 * left_link7_inertia_scale}" ixy="${-(-0.000000072115 * left_link7_inertia_scale)}" ixz="${-(-0.000112700000 * left_link7_inertia_scale)}"
+                 iyy="${0.001700000000 * left_link7_inertia_scale}" iyz="${0.000000004097 * left_link7_inertia_scale}" izz="${0.002004000000 * left_link7_inertia_scale}"/>
       </inertial>
     </link>
     <joint name="left_joint6" type="revolute">
       <parent link="left_link6"/><child link="left_link7"/>
-      <origin xyz="-0.032 0.043 0.08"/><axis xyz="1 0 0"/>
-      <limit lower="-${pi / 6}" upper="${pi / 6}" effort="30" velocity="4.18879"/>
+      <origin xyz="-0.015 0.0185 0.00"/><axis xyz="1 0 0"/>
+      <limit lower="${-15 * pi / 180}" upper="${15 * pi / 180}" effort="30" velocity="4.18879"/>
       <dynamics damping="2.0" friction="0.04"/>
     </joint>
 
@@ -113,6 +147,7 @@
     <gazebo reference="left_link4"><mu1>0.5</mu1><mu2>0.5</mu2><kp>200000</kp><kd>1000</kd><maxVel>0.05</maxVel><minDepth>0.001</minDepth></gazebo>
     <gazebo reference="left_link5"><mu1>0.5</mu1><mu2>0.5</mu2><kp>200000</kp><kd>1000</kd><maxVel>0.05</maxVel><minDepth>0.001</minDepth></gazebo>
     <gazebo reference="left_link6"><mu1>0.5</mu1><mu2>0.5</mu2><kp>200000</kp><kd>1000</kd><maxVel>0.05</maxVel><minDepth>0.001</minDepth></gazebo>
-    <gazebo reference="left_link7"><mu1>0.9</mu1><mu2>0.9</mu2><kp>200000</kp><kd>1000</kd><maxVel>0.05</maxVel><minDepth>0.001</minDepth></gazebo>
+    <!-- TPU sole: both tangential friction directions use the shared foot_friction estimate. -->
+    <gazebo reference="left_link7"><mu1>${foot_friction}</mu1><mu2>${foot_friction}</mu2><kp>200000</kp><kd>1000</kd><maxVel>0.05</maxVel><minDepth>0.001</minDepth></gazebo>
   </xacro:macro>
 </robot>

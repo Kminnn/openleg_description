@@ -4,7 +4,7 @@
   <xacro:arg name="controllers_file" default="$(find openleg_description)/config/controllers.yaml"/>
 
   <!-- Change these dimensions first when adapting the model to the real hardware. -->
-  <xacro:property name="base_mass" value="2.5"/>
+  <xacro:property name="base_mass" value="${4.264361 + 0.5}"/>
   <!-- EDITABLE: replace with the measured upper-body inertial data. -->
   <xacro:property name="upper_body_mass" value="3.4"/>
   <!-- EDITABLE: replace with the measured torso inertial data. -->
@@ -14,7 +14,7 @@
   <xacro:property name="pelvis_z" value="0.26"/>
   <!-- Inward test spacing: reduces the lateral COM transfer needed for one-leg support. -->
   <xacro:property name="hip_spacing" value="0.000"/>
-  <xacro:property name="link1_z" value="0.078"/>
+  <xacro:property name="link1_z" value="0.077"/>
   <xacro:property name="upper_leg_length" value="0.36"/>
   <xacro:property name="lower_leg_length" value="0.36"/>
   <!-- Moderate single-support footprint: 200 x 140 x 30 mm. -->
@@ -22,6 +22,9 @@
   <xacro:property name="foot_width" value="0.14"/>
   <xacro:property name="foot_height" value="0.03"/>
   <xacro:property name="foot_collision_width" value="0.14"/>
+  <!-- Provisional isotropic TPU sole friction on a dry indoor floor; calibrate on hardware.
+       Material alone does not fix friction. Reference: doi:10.26599/FRICT.2025.9441044. -->
+  <xacro:property name="foot_friction" value="0.8"/>
 
   <material name="pelvis_white"><color rgba="0.55 0.55 0.55 1"/></material>
   <material name="left_leg_blue"><color rgba="0.55 0.55 0.55 1"/></material>
@@ -42,65 +45,18 @@
       <origin xyz="0 0 0" rpy="0 0 ${pi / 2}"/>
       <geometry><mesh filename="package://openleg_description/meshes/base/Base.stl" scale="1 1 1"/></geometry>
     </collision>
-    <!-- Fusion inertia at COM, transformed into base_link axes and scaled for the 2.5 kg total mass. -->
-    <inertial><origin xyz="0.000013 0.000550 0.143563"/>
+    <!-- CAD mass: 4.264361 kg, plus 0.5 kg for bolts and wires.
+         CAD X/Y/Z map to URDF -Y/X/Z; CAD and link origins coincide.
+         Inertia at COM is converted from g mm^2 to kg m^2, then scaled
+         assuming the added mass follows the CAD mass distribution; COM is unchanged. -->
+    <xacro:property name="base_inertia_scale" value="${base_mass / 4.264361}"/>
+    <inertial>
+      <origin xyz="-0.000016 1.070e-9 0.191553" rpy="0 0 0"/>
       <mass value="${base_mass}"/>
-      <inertia ixx="0.010284366864" ixy="-0.000000073216" ixz="-0.000000349169"
-               iyy="0.012990553920" iyz="-0.000007596132" izz="0.007354536828"/>
+      <inertia ixx="${0.023750000000 * base_inertia_scale}" ixy="${-7.863e-14 * base_inertia_scale}" ixz="${0.000001655446 * base_inertia_scale}"
+               iyy="${0.021920000000 * base_inertia_scale}" iyz="${0.000000744597 * base_inertia_scale}" izz="${0.013830000000 * base_inertia_scale}"/>
     </inertial>
   </link>
-
-  <!-- Waist yaw: the UpperBody CAD origin is 207 mm above the base-link origin. -->
-  <link name="upper_body_link">
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 ${pi / 2}"/>
-      <geometry><mesh filename="package://openleg_description/meshes/base/UpperBody.stl" scale="1 1 1"/></geometry>
-      <material name="pelvis_white"/>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 ${pi / 2}"/>
-      <geometry><mesh filename="package://openleg_description/meshes/base/UpperBody.stl" scale="1 1 1"/></geometry>
-    </collision>
-    <!-- Fusion inertia at COM, transformed into upper_body_link axes and scaled for the 3.4 kg total mass. -->
-    <inertial>
-      <origin xyz="0.000019 0 0.067755"/>
-      <mass value="${upper_body_mass}"/>
-      <inertia ixx="0.009092410126" ixy="0" ixz="-0.000000147058" iyy="0.006325647511" iyz="-0.000000766627" izz="0.008640210279"/>
-    </inertial>
-  </link>
-  <joint name="waist_joint" type="revolute">
-    <parent link="base_link"/><child link="upper_body_link"/>
-    <origin xyz="0 0 0.207" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-${pi / 2}" upper="${pi / 2}" effort="40" velocity="5.23599"/>
-    <dynamics damping="2.0" friction="0.05"/>
-  </joint>
-
-  <!-- Torso pitch: the Torso CAD origin is 70 mm above the upper-body origin. -->
-  <link name="torso_link">
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 ${pi / 2}"/>
-      <geometry><mesh filename="package://openleg_description/meshes/base/Torso.stl" scale="1 1 1"/></geometry>
-      <material name="pelvis_white"/>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 ${pi / 2}"/>
-      <geometry><mesh filename="package://openleg_description/meshes/base/Torso.stl" scale="1 1 1"/></geometry>
-    </collision>
-    <!-- Provisional electronics and structure estimate; replace with Fusion values when the assembly is complete. -->
-    <inertial>
-      <origin xyz="0 0.065 0.110"/>
-      <mass value="${torso_mass}"/>
-      <inertia ixx="0.065980" ixy="0" ixz="0" iyy="0.060544" iyz="0" izz="0.034990"/>
-    </inertial>
-  </link>
-  <joint name="torso_pitch_joint" type="revolute">
-    <parent link="upper_body_link"/><child link="torso_link"/>
-    <origin xyz="0 -0.065 0.07" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-${pi / 6}" upper="${pi / 2}" effort="80" velocity="5.23599"/>
-    <dynamics damping="2.0" friction="0.05"/>
-  </joint>
 
   <xacro:left_leg parent="base_link" hip_y="${hip_spacing / 2}" link1_z="${link1_z}"
                   upper_leg_length="${upper_leg_length}" lower_leg_length="${lower_leg_length}"
@@ -142,13 +98,13 @@
       <xacro:position_controlled_joint joint_name="torso_pitch_joint"/>
     </ros2_control>
 
-    <!-- Simulated body IMU, mounted 70 mm above the base-link origin. -->
+    <!-- Simulated body IMU, mounted 180 mm above the base-link origin. -->
     <gazebo reference="base_link">
       <mu1>0.5</mu1><mu2>0.5</mu2>
       <kp>200000</kp><kd>1000</kd>
       <maxVel>0.05</maxVel><minDepth>0.001</minDepth>
       <sensor name="base_imu" type="imu">
-        <pose>0 0 0.070 0 0 0</pose>
+        <pose>0 0 0.180 0 0 0</pose>
         <always_on>true</always_on>
         <update_rate>100</update_rate>
         <topic>/imu</topic>

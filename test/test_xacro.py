@@ -41,7 +41,7 @@ def test_gazebo_model_uses_physics_and_base_imu():
     sensor = robot.find("./gazebo[@reference='base_link']/sensor[@name='base_imu']")
     assert sensor is not None
     assert sensor.get("type") == "imu"
-    assert sensor.findtext("pose") == "0 0 0.070 0 0 0"
+    assert sensor.findtext("pose") == "0 0 0.180 0 0 0"
     assert sensor.findtext("topic") == "/imu"
 
     plugins = robot.findall("./gazebo/plugin")
